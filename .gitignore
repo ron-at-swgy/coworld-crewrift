@@ -1,0 +1,32 @@
+# Ignore files with no extention.
+*
+!*/
+!*.*
+!LICENSE
+!Dockerfile
+
+# Ignore hidden files, but not the license or github files.
+.*
+!.github/
+!.github/**
+!.gitignore
+
+# Normal ignores.
+*.exe
+nimcache
+*.pdb
+*.ilk
+*.out
+out/
+tmp/
+__pycache__/
+*.pyc
+*.dylib
+*.dylib.abi
+*.log
+.DS_Store
+
+# Project specific ignores.
+client/screenshots/
+players/modulabot/modulabot
+players/modulabot/test/parity

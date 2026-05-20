@@ -1,0 +1,27 @@
+version     = "0.1.0"
+author      = "treeform"
+description = "Retro 128x128 multiplayer social deduction AI environment."
+license     = "MIT"
+
+srcDir = "src"
+bin = @[
+  "crewrift",
+  "crewrift/replay_viewer",
+  "crewrift/clients/global_client",
+  "crewrift/clients/player_client",
+  "crewrift/clients/reward_client"
+]
+
+switch("threads", "on")
+switch("mm", "orc")
+
+requires "nim >= 2.2.4"
+requires "pixie"
+requires "mummy >= 0.4.7"
+requires "curly >= 1.1.1"
+requires "silky >= 0.0.2"
+requires "windy >= 0.4.4"
+requires "paddy >= 0.1.0"
+requires "supersnappy >= 2.1.3"
+requires "jsony"
+requires "zippy"
