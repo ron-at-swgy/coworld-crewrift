@@ -116,6 +116,22 @@ suite "stats":
         check account.winsCrewmate == 1
         check account.winsImposter == 0
 
+  test "task win settles final task reward before win":
+    let config = defaultGameConfig()
+    var sim = initCrewriftForTest(config)
+
+    let playerIndex = sim.addPlayer("last-task", 0)
+    sim.phase = Playing
+    sim.players[playerIndex].role = Crewmate
+    sim.players[playerIndex].assignedTasks = @[0]
+    sim.tasks[0].completed[playerIndex] = true
+
+    sim.checkWinCondition()
+
+    check sim.phase == GameOver
+    check sim.players[playerIndex].reward == TaskReward + WinReward
+    check sim.accountFor("last-task").tasks == 1
+
   test "active disconnect removes task burden and forfeits win":
     var config = defaultGameConfig()
     config.minPlayers = 4

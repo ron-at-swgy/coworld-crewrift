@@ -323,6 +323,7 @@ type
     color*: uint8
     taskProgress*: int
     activeTask*: int
+    tasksRewarded*: int
     ventCooldown*: int
     buttonCallsUsed*: int
     lastChatTick*: int
@@ -1673,6 +1674,7 @@ proc gameHash*(sim: SimServer): uint64 =
     result.mixHashInt(int(player.color))
     result.mixHashInt(player.taskProgress)
     result.mixHashInt(player.activeTask)
+    result.mixHashInt(player.tasksRewarded)
     result.mixHashInt(player.ventCooldown)
     result.mixHashInt(player.buttonCallsUsed)
     result.mixHashInt(player.lastChatTick)
@@ -2351,7 +2353,35 @@ proc completeTask*(sim: var SimServer, playerIndex, taskIndex: int) =
   sim.tasks[taskIndex].completed[playerIndex] = true
   sim.addReward(playerIndex, TaskReward)
   sim.recordTask(playerIndex)
+  inc sim.players[playerIndex].tasksRewarded
   sim.players[playerIndex].lastMoveTick = sim.tickCount
+
+proc completedTaskCount(sim: SimServer, playerIndex: int): int =
+  ## Returns completed assigned tasks for one current player.
+  if playerIndex < 0 or playerIndex >= sim.players.len:
+    return 0
+  for taskIndex in sim.players[playerIndex].assignedTasks:
+    if taskIndex < 0 or taskIndex >= sim.tasks.len:
+      continue
+    if playerIndex >= sim.tasks[taskIndex].completed.len:
+      continue
+    if sim.tasks[taskIndex].completed[playerIndex]:
+      inc result
+
+proc settleCompletedTaskRewards(sim: var SimServer, playerIndex: int) =
+  ## Awards any completed task flags that have not yet paid out.
+  if playerIndex < 0 or playerIndex >= sim.players.len:
+    return
+  let completed = sim.completedTaskCount(playerIndex)
+  while sim.players[playerIndex].tasksRewarded < completed:
+    sim.addReward(playerIndex, TaskReward)
+    sim.recordTask(playerIndex)
+    inc sim.players[playerIndex].tasksRewarded
+
+proc settleAllCompletedTaskRewards(sim: var SimServer) =
+  ## Settles task rewards before the match result is awarded.
+  for i in 0 ..< sim.players.len:
+    sim.settleCompletedTaskRewards(i)
 
 proc startGame*(sim: var SimServer) =
   logGameEvent(
@@ -2363,6 +2393,7 @@ proc startGame*(sim: var SimServer) =
   for player in sim.players.mitems:
     player.role = Crewmate
     player.assignedTasks = @[]
+    player.tasksRewarded = 0
   var
     candidates: seq[int] = @[]
     fixedImposters = 0
@@ -3280,6 +3311,7 @@ proc finishGame*(sim: var SimServer, winner: PlayerRole, timeLimitReached = fals
   ## Moves to game over and awards all winning players.
   if sim.phase == GameOver:
     return
+  sim.settleAllCompletedTaskRewards()
   if timeLimitReached:
     logGameEvent("draw: time limit reached")
   else:
