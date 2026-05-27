@@ -615,18 +615,6 @@ proc buildRewardPacket(sim: SimServer): string {.measure.} =
       result.addStatLine("vote_skip", identity, account.voteSkip)
       result.addStatLine("vote_timeout", identity, account.voteTimeout)
 
-proc writeData(
-  uri,
-  data,
-  contentType,
-  source: string
-) =
-  ## Writes data to a URI. Supports file:// and http(s):// (PUT).
-  if uri.len == 0:
-    return
-  writeCogameUri(uri, data, contentType, source)
-  echo "Written: ", data.len, " bytes -> ", uri
-
 proc runServerLoop*(
   host = DefaultHost,
   port = DefaultPort,
@@ -634,9 +622,7 @@ proc runServerLoop*(
   saveReplayPath = "",
   loadReplayPath = "",
   saveScoresPath = "",
-  replayServerMode = false,
-  saveReplayUri = "",
-  saveScoresUri = ""
+  runtimeConfig = RuntimeConfig()
 ) =
   initAppState()
   if saveReplayPath.len > 0 and loadReplayPath.len > 0:
@@ -666,7 +652,7 @@ proc runServerLoop*(
     finishProfileTrace()
     replayWriter.closeReplayWriter()
   appState.replayLoaded = replayLoaded
-  appState.replayServerMode = replayServerMode
+  appState.replayServerMode = replayLoaded
   appState.config = config
 
   let httpServer = newServer(
@@ -1079,21 +1065,10 @@ proc runServerLoop*(
       if saveReplayPath.len > 0 and fileExists(saveReplayPath):
         echo "Replay written: ", saveReplayPath,
           " (", getFileSize(saveReplayPath), " bytes)"
-        if saveReplayUri.len > 0 and saveReplayUri != saveReplayPath:
-          writeData(
-            saveReplayUri,
-            readFile(saveReplayPath),
-            "application/octet-stream",
-            CogameSaveReplayUriEnv
-          )
-      if saveScoresUri.len > 0:
+        runtimeConfig.writeReplay(readFile(saveReplayPath))
+      if runtimeConfig.resultsUri.len > 0:
         let scoresJson = sim.playerResultsJson() & "\n"
-        writeData(
-          saveScoresUri,
-          scoresJson,
-          "application/json",
-          CogameResultsUriEnv
-        )
+        runtimeConfig.writeResults(scoresJson)
       elif saveScoresPath.len > 0:
         writeFile(saveScoresPath, sim.playerResultsJson() & "\n")
         echo "Scores written: ", saveScoresPath,

@@ -7,7 +7,8 @@
     "owner": "treeform@softmax.com",
     "runnable": {
       "type": "game",
-      "image": "public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest"
+      "image": "public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest",
+      "run": ["/bin/crewrift"]
     },
     "config_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

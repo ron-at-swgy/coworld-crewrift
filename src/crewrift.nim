@@ -7,49 +7,34 @@ import
 
 when isMainModule:
   let
-    address = cogameHost(DefaultHost)
-    port = cogamePort(DefaultPort)
-    configUri = getEnv(CogameConfigUriEnv)
-    saveReplayUri = getEnv(CogameSaveReplayUriEnv)
-    saveScoresUri = getEnv(CogameResultsUriEnv)
-    loadReplayUri = getEnv(CogameLoadReplayUriEnv)
-    localReplayPath = outputPathFromCogameUri(
-      saveReplayUri,
-      CogameSaveReplayUriEnv,
-      "crewrift_replay.bitreplay"
-    )
-    localScoresPath = outputPathFromCogameUri(
-      saveScoresUri,
-      CogameResultsUriEnv,
-      "crewrift_scores.json"
-    )
-    loadReplayPath = pathFromCogameUri(loadReplayUri, CogameLoadReplayUriEnv)
-    replayServerMode = getEnv(CogameReplayServerEnv) == "1"
-    replayDownloadUrl = getEnv("REPLAY_DOWNLOAD_URL")
+    runtimeConfig = readRuntimeConfig(DefaultHost, DefaultPort)
+    localReplayPath =
+      if runtimeConfig.replayUri.len > 0:
+        getTempDir() / ("crewrift-replay-" & $getCurrentProcessId() &
+          ".bitreplay")
+      else:
+        ""
 
   var config = defaultGameConfig()
-  if configUri.len > 0:
-    config.update(readCogameUri(configUri, CogameConfigUriEnv))
+  config.update(runtimeConfig.config)
   echo "Using map file: " & config.mapPath
 
-  var actualLoadReplayPath = loadReplayPath
-  if replayDownloadUrl.len > 0 and actualLoadReplayPath.len == 0 and
-      not replayServerMode:
-    echo "Downloading replay from: ", replayDownloadUrl
-    actualLoadReplayPath = "/tmp/downloaded.bitreplay"
-    let replayData = readCogameUri(replayDownloadUrl, "REPLAY_DOWNLOAD_URL")
-    writeFile(actualLoadReplayPath, replayData)
-    echo "Replay downloaded: ", replayData.len, " bytes"
+  let loadReplayPath =
+    if runtimeConfig.replayMode:
+      let path = getTempDir() / ("crewrift-load-replay-" &
+        $getCurrentProcessId() & ".bitreplay")
+      writeFile(path, runtimeConfig.replay)
+      path
+    else:
+      ""
 
-  echo "starting crewrift on ", address, ":", port
+  echo "starting crewrift on ", runtimeConfig.host, ":", runtimeConfig.port
   runServerLoop(
-    address,
-    port,
+    runtimeConfig.host,
+    runtimeConfig.port,
     config,
     localReplayPath,
-    actualLoadReplayPath,
-    localScoresPath,
-    replayServerMode,
-    saveReplayUri,
-    saveScoresUri
+    loadReplayPath,
+    "",
+    runtimeConfig
   )
