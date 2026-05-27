@@ -1,6 +1,6 @@
 import
   std/[algorithm, locks, monotimes, nativesockets, os, strutils, tables, times],
-  bitworld/client as bitworldClient, curly, mummy,
+  bitworld/client as bitworldClient, bitworld/runtime, curly, mummy,
   protocol, sim, global, profile, replays
 
 when defined(posix):
@@ -106,18 +106,7 @@ let replayDownloadPool = newCurlPool(1)
 
 proc loadReplayUri(uri: string): ReplayData =
   ## Loads a replay from a local file URI or HTTP(S) URL.
-  if uri.startsWith("http://") or uri.startsWith("https://"):
-    let response = replayDownloadPool.get(uri)
-    if response.code != 200:
-      raise newException(
-        IOError,
-        "Replay download failed: " & $response.code
-      )
-    return parseReplayBytes(response.body)
-  let path = replayFilePath(uri)
-  if path.len == 0:
-    raise newException(IOError, "Unsupported replay URI: " & uri)
-  loadReplay(path)
+  parseReplayBytes(readCogameUri(uri, CogameLoadReplayUriEnv))
 
 proc readableReplayUri(uri: string): bool =
   ## Returns true when a replay URI can be opened by this server.
@@ -626,23 +615,24 @@ proc buildRewardPacket(sim: SimServer): string {.measure.} =
       result.addStatLine("vote_skip", identity, account.voteSkip)
       result.addStatLine("vote_timeout", identity, account.voteTimeout)
 
-let uploadPool = newCurlPool(1)
-
-proc writeData(uri, data: string, contentType = "application/octet-stream") =
+proc writeData(
+  uri,
+  data,
+  contentType,
+  source,
+  methodEnv: string
+) =
   ## Writes data to a URI. Supports file:// and http(s):// (PUT).
-  if uri.startsWith("http://") or uri.startsWith("https://"):
-    let headers = @[("Content-Type", contentType)]
-    let resp = uploadPool.put(uri, headers, data)
-    if resp.code < 200 or resp.code >= 300:
-      echo "ERROR: upload to ", uri, " failed: ", resp.code
-    else:
-      echo "Uploaded: ", data.len, " bytes -> ", uri
-  elif uri.len > 0:
-    var path = uri
-    if path.startsWith("file://"):
-      path = path[7 .. ^1]
-    writeFile(path, data)
-    echo "Written: ", path, " (", data.len, " bytes)"
+  if uri.len == 0:
+    return
+  writeCogameUri(
+    uri,
+    data,
+    contentType,
+    source,
+    cogameHttpMethodForUri(uri, methodEnv)
+  )
+  echo "Written: ", data.len, " bytes -> ", uri
 
 proc runServerLoop*(
   host = DefaultHost,
@@ -1097,10 +1087,22 @@ proc runServerLoop*(
         echo "Replay written: ", saveReplayPath,
           " (", getFileSize(saveReplayPath), " bytes)"
         if saveReplayUri.len > 0 and saveReplayUri != saveReplayPath:
-          writeData(saveReplayUri, readFile(saveReplayPath))
+          writeData(
+            saveReplayUri,
+            readFile(saveReplayPath),
+            "application/octet-stream",
+            CogameSaveReplayUriEnv,
+            CogameSaveReplayMethodEnv
+          )
       if saveScoresUri.len > 0:
         let scoresJson = sim.playerResultsJson() & "\n"
-        writeData(saveScoresUri, scoresJson, "application/json")
+        writeData(
+          saveScoresUri,
+          scoresJson,
+          "application/json",
+          CogameResultsUriEnv,
+          CogameResultsMethodEnv
+        )
       elif saveScoresPath.len > 0:
         writeFile(saveScoresPath, sim.playerResultsJson() & "\n")
         echo "Scores written: ", saveScoresPath,
