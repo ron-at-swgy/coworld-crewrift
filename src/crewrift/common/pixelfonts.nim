@@ -1,7 +1,7 @@
 import
   std/[os, strutils],
   pixie,
-  crewrift/aseprite,
+  ../aseprite,
   framebuffers,
   protocol
 

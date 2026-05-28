@@ -1,9 +1,9 @@
 import
   std/os,
   supersnappy,
-  protocol, profile, sim,
-  crewrift/common/pixelfonts,
-  crewrift/common/framebuffers
+  common/protocol, profile, sim,
+  common/pixelfonts,
+  common/framebuffers
 
 const
   ReplayScrubberSpriteId = 4004

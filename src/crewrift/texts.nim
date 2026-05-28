@@ -1,7 +1,7 @@
 import
   std/strutils,
-  crewrift/common/pixelfonts,
-  crewrift/common/protocol
+  common/pixelfonts,
+  common/protocol
 
 const
   TextBackground = 0'u8

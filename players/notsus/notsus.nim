@@ -1,15 +1,17 @@
-import pixie, protocol, framebuffers, sim, texts,
+import pixie,
+  ../../src/crewrift/common/[protocol, framebuffers],
+  ../../src/crewrift/[sim, texts],
   notsus/[protocols, votereader]
 when defined(profileTracePath):
   import profile
 else:
-  import profile except measure
+  import ../../src/crewrift/profile except measure
 
   template measure() {.pragma.}
 when not defined(italkalotLibrary):
   import whisky
   when not defined(botHeadless):
-    import windy, scales
+    import windy, ../../src/crewrift/common/scales
     import silky except measure
 import std/[algorithm, exitprocs, heapqueue, monotimes, options, os,
   random, strutils, times]

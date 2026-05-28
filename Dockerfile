@@ -27,9 +27,7 @@ ENV PATH="/root/.nimby/nim/bin:$PATH"
 
 WORKDIR /workspace/crewrift
 COPY nimby.lock .
-COPY nim.cfg .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby --global sync nimby.lock
 
 COPY . .
 ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"

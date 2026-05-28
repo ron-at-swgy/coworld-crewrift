@@ -1,7 +1,7 @@
 import
   std/[algorithm, os],
   pixie, zippy,
-  crewrift/common/framebuffers
+  common/framebuffers
 
 type
   AsepriteError* = object of ValueError

@@ -1,7 +1,8 @@
 import
   std/[algorithm, options, strutils],
   pixie, supersnappy, whisky,
-  protocol, profile, framebuffers
+  ../../../src/crewrift/common/[protocol, framebuffers],
+  ../../../src/crewrift/profile
 
 const
   MaxFrameDrain* = 128

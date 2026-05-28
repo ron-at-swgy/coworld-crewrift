@@ -1,10 +1,7 @@
 import
   std/strutils,
-  protocol,
-  profile,
-  framebuffers,
-  sim,
-  pixelfonts
+  ../../../src/crewrift/common/[protocol, framebuffers, pixelfonts],
+  ../../../src/crewrift/[profile, sim]
 
 const
   VoteReaderActorSize* = VoteActorSize

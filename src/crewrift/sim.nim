@@ -1,11 +1,11 @@
 import
   std/[json, math, os, random, strutils, tables],
   jsony, pixie,
-  crewrift/aseprite,
-  crewrift/resources,
-  protocol, profile,
-  crewrift/common/pixelfonts,
-  crewrift/common/framebuffers
+  aseprite,
+  resources,
+  common/protocol, profile,
+  common/pixelfonts,
+  common/framebuffers
 
 const
   GameName* = "crewrift"

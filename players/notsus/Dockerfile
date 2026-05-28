@@ -27,9 +27,7 @@ ENV PATH="/root/.nimby/nim/bin:$PATH"
 
 WORKDIR /workspace/crewrift
 COPY nimby.lock .
-COPY nim.cfg .
-RUN nimby --global sync nimby.lock && \
-  cat nim.cfg >> /root/.nimby/nim/config/nim.cfg
+RUN nimby --global sync nimby.lock
 
 COPY . .
 RUN nim c \
@@ -56,4 +54,4 @@ COPY --from=build /workspace/crewrift/notsus /bin/notsus
 COPY --from=build /workspace/crewrift/data/croatoan.resources \
   ./data/croatoan.resources
 
-CMD ["/bin/notsus", "--address:host.docker.internal", "--port:8080"]
+CMD ["/bin/notsus"]
