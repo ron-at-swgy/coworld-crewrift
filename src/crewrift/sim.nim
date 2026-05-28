@@ -1,6 +1,6 @@
 import
   std/[json, math, os, random, strutils, tables],
-  jsony, pixie,
+  bitworld/client as bitworldClient, jsony, pixie,
   aseprite,
   resources,
   common/protocol, profile,
@@ -432,31 +432,11 @@ var
 
 proc gameDir*(): string =
   ## Returns the Crewrift game directory.
-  when defined(emscripten):
-    "crewrift"
-  else:
-    getCurrentDir()
+  getCurrentDir()
 
 proc clientDataDir*(): string =
   ## Returns the shared client data directory.
-  when defined(emscripten):
-    "client" / "data"
-  else:
-    let
-      cwd = getCurrentDir()
-      sourceDir = currentSourcePath().parentDir()
-      repoDir = sourceDir.parentDir().parentDir()
-      candidates = [
-        cwd / "client" / "data",
-        cwd / "data",
-        cwd / ".." / "client" / "data",
-        repoDir / "client" / "data",
-        sourceDir / "client" / "data"
-      ]
-    for candidate in candidates:
-      if dirExists(candidate):
-        return candidate
-    repoDir / "client" / "data"
+  bitworldClient.clientDir() / "data"
 
 proc resolveGamePath*(path: string, baseDir = ""): string =
   ## Resolves a game data path against the map file and game directory.

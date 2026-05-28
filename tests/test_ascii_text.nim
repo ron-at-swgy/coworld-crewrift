@@ -8,7 +8,6 @@ import
 
 const
   GameDir = currentSourcePath.parentDir.parentDir
-  RootDir = GameDir.parentDir
 
 type TextCase = object
   text: string
@@ -17,7 +16,7 @@ type TextCase = object
 
 proc loadTestAsciiSprites(): PixelFont =
   ## Loads the Crewrift tiny ASCII font for text OCR tests.
-  loadPalette(RootDir / "client" / "data" / "pallete.png")
+  loadPalette()
   loadAsciiSprites(GameDir / "data" / "tiny5.aseprite")
 
 proc renderText(
