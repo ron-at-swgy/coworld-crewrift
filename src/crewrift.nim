@@ -1,13 +1,12 @@
 import
   std/os,
   bitworld/runtime,
-  crewrift/common/protocol,
   crewrift/sim,
   crewrift/server
 
 when isMainModule:
   let
-    runtimeConfig = readRuntimeConfig(DefaultHost, DefaultPort)
+    runtimeConfig = readRuntimeConfig()
     localReplayPath =
       if runtimeConfig.replayUri.len > 0:
         getTempDir() / ("crewrift-replay-" & $getCurrentProcessId() &
