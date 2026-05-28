@@ -166,12 +166,12 @@ the certifier:
 docker build \
   --platform=linux/amd64 \
   -f Dockerfile \
-  -t ghcr.io/treeform/crewrift-runner:latest \
+  -t public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest \
   .
 docker build \
   --platform=linux/amd64 \
-  -f players/nottoodumb/Dockerfile \
-  -t ghcr.io/treeform/crewrift-nottoodumb:latest \
+  -f players/notsus/Dockerfile \
+  -t public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest \
   .
 coworld certify coworld_manifest.json
 ```
@@ -182,7 +182,7 @@ Upload the certified Coworld with:
 coworld upload-coworld coworld_manifest.json
 ```
 
-For the full production release flow from Crewrift `master`, including GHCR
+For the full production release flow from Crewrift `master`, including ECR
 image pushes, Coworld certification/upload, and hosted replay viewer upload,
 run:
 
