@@ -1,7 +1,6 @@
 import
   std/os,
-  bitworld/pixelfonts, bitworld/profile, bitworld/protocol, bitworld/server,
-  supersnappy,
+  bitworld/pixelfonts, bitworld/profile, bitworld/spriteprotocol, bitworld/server,
   sim
 
 const
@@ -285,64 +284,6 @@ proc selectedCrewPlayerSpriteId(colorIndex, slotId: int, flipH: bool): int =
   SelectedPlayerSpriteBase + (colorIndex * CrewSpriteVariants + variant) * 2 +
     side
 
-proc addU8(packet: var seq[uint8], value: uint8) =
-  ## Appends one unsigned byte to a global protocol packet.
-  packet.add(value)
-
-proc addU16(packet: var seq[uint8], value: int) =
-  ## Appends one little endian unsigned 16 bit value.
-  let v = uint16(value)
-  packet.add(uint8(v and 0xff'u16))
-  packet.add(uint8(v shr 8))
-
-proc addU32(packet: var seq[uint8], value: int) =
-  ## Appends one little endian unsigned 32 bit value.
-  let v = uint32(value)
-  for shift in countup(0, 24, 8):
-    packet.add(uint8((v shr shift) and 0xff'u32))
-
-proc addI16(packet: var seq[uint8], value: int) =
-  ## Appends one little endian signed 16 bit value.
-  let v = cast[uint16](int16(value))
-  packet.add(uint8(v and 0xff'u16))
-  packet.add(uint8(v shr 8))
-
-proc addViewport(packet: var seq[uint8], layer, width, height: int) =
-  ## Appends a global protocol viewport message.
-  packet.addU8(0x05)
-  packet.addU8(uint8(layer))
-  packet.addU16(width)
-  packet.addU16(height)
-
-proc addLayer(packet: var seq[uint8], layer, layerType, flags: int) =
-  ## Appends a global protocol layer definition message.
-  packet.addU8(0x06)
-  packet.addU8(uint8(layer))
-  packet.addU8(uint8(layerType))
-  packet.addU8(uint8(flags))
-
-proc addSprite(
-  packet: var seq[uint8],
-  spriteId, width, height: int,
-  pixels: openArray[uint8],
-  label: string = ""
-) {.measure.} =
-  ## Appends a global protocol sprite definition message.
-  packet.addU8(0x01)
-  packet.addU16(spriteId)
-  packet.addU16(width)
-  packet.addU16(height)
-  var raw = newSeq[uint8](pixels.len)
-  for i in 0 ..< pixels.len:
-    raw[i] = pixels[i]
-  let compressed = supersnappy.compress(raw)
-  packet.addU32(compressed.len)
-  for byte in compressed:
-    packet.addU8(byte)
-  packet.addU16(label.len)
-  for ch in label:
-    packet.addU8(uint8(ord(ch)))
-
 proc spriteDefinitionIndex(
   defs: openArray[SpriteDefinition],
   spriteId: int
@@ -381,82 +322,32 @@ proc addSpriteChanged(
     )
   packet.addSprite(spriteId, width, height, pixels, label)
 
-proc addObject(
-  packet: var seq[uint8],
-  objectId, x, y, z, layer, spriteId: int
-) {.measure.} =
-  ## Appends a global protocol object definition message.
-  packet.addU8(0x02)
-  packet.addU16(objectId)
-  packet.addI16(x)
-  packet.addI16(y)
-  packet.addI16(z)
-  packet.addU8(uint8(layer))
-  packet.addU16(spriteId)
-
-proc addDeleteObject(packet: var seq[uint8], objectId: int) {.measure.} =
-  ## Appends a global protocol object delete message.
-  packet.addU8(0x03)
-  packet.addU16(objectId)
-
-proc readProtocolI16(blob: string, offset: int): int =
-  ## Reads one little endian signed 16 bit value from a string.
-  let value = uint16(blob[offset].uint8) or
-    (uint16(blob[offset + 1].uint8) shl 8)
-  int(cast[int16](value))
-
 proc applyGlobalViewerMessage*(
   state: var GlobalViewerState,
   message: string
 ) =
   ## Applies one or more global protocol client messages.
-  var offset = 0
-  while offset < message.len:
-    let messageType = message[offset].uint8
-    inc offset
-    case messageType
-    of 0x82:
-      if offset + 4 > message.len:
-        return
-      state.mouseX = readProtocolI16(message, offset)
-      state.mouseY = readProtocolI16(message, offset + 2)
-      offset += 4
-      if offset < message.len and message[offset].uint8 notin
-          {0x81'u8, 0x82'u8, 0x83'u8, 0x84'u8}:
-        state.mouseLayer = int(message[offset].uint8)
-        inc offset
-      else:
-        state.mouseLayer = MapLayerId
-    of 0x83:
-      if offset + 2 > message.len:
-        return
-      let
-        code = message[offset].uint8
-        down = message[offset + 1].uint8
-      offset += 2
-      if code == 0x01'u8:
-        state.mouseDown = down == 1'u8
+  for item in message.parseSpriteClientMessages():
+    case item.kind
+    of SpriteClientMouseMoveMessage:
+      state.mouseX = item.x
+      state.mouseY = item.y
+      state.mouseLayer =
+        if item.hasLayer:
+          item.layer
+        else:
+          MapLayerId
+    of SpriteClientMouseButtonMessage:
+      if item.button == 0x01'u8:
+        state.mouseDown = item.down
         if state.mouseDown:
           state.clickPending = true
         else:
           state.scrubbingReplay = false
-    of 0x81:
-      if offset + 2 > message.len:
-        return
-      let length = int(uint16(message[offset].uint8) or
-        (uint16(message[offset + 1].uint8) shl 8))
-      offset += 2
-      if offset + length > message.len:
-        return
-      for i in 0 ..< length:
-        state.replayCommands.add(message[offset + i])
-      offset += length
-    of 0x84:
-      if offset + 1 > message.len:
-        return
-      inc offset
-    else:
-      return
+    of SpriteClientChatMessage:
+      state.replayCommands.add(item.text)
+    of SpriteClientInputMessage:
+      discard
 
 proc applyPlayerViewerMessage*(
   state: var PlayerViewerState,
@@ -465,42 +356,14 @@ proc applyPlayerViewerMessage*(
   chatText: var string
 ) =
   ## Applies sprite player protocol input messages.
-  var offset = 0
-  while offset < message.len:
-    let messageType = message[offset].uint8
-    inc offset
-    case messageType
-    of 0x81:
-      if offset + 2 > message.len:
-        return
-      let length = int(uint16(message[offset].uint8) or
-        (uint16(message[offset + 1].uint8) shl 8))
-      offset += 2
-      if offset + length > message.len:
-        return
-      for i in 0 ..< length:
-        let value = message[offset + i].uint8
-        if value >= 32'u8 and value < 127'u8:
-          chatText.add(message[offset + i])
-      offset += length
-    of 0x82:
-      if offset + 4 > message.len:
-        return
-      offset += 4
-      if offset < message.len and message[offset].uint8 notin
-          {0x81'u8, 0x82'u8, 0x83'u8, 0x84'u8}:
-        inc offset
-    of 0x83:
-      if offset + 2 > message.len:
-        return
-      offset += 2
-    of 0x84:
-      if offset + 1 > message.len:
-        return
-      inputMask = message[offset].uint8 and 0x7f'u8
-      inc offset
-    else:
-      return
+  for item in message.parseSpriteClientMessages():
+    case item.kind
+    of SpriteClientChatMessage:
+      chatText.add(item.text)
+    of SpriteClientInputMessage:
+      inputMask = item.mask
+    of SpriteClientMouseMoveMessage, SpriteClientMouseButtonMessage:
+      discard
 
 proc isSolid(sprite: Sprite, x, y: int, flipH: bool): bool =
   let srcX = if flipH: sprite.width - 1 - x else: x

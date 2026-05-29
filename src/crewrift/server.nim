@@ -1,6 +1,6 @@
 import
   std/[algorithm, locks, monotimes, nativesockets, os, strutils, tables, times],
-  bitworld/client as bitworldClient, bitworld/profile, bitworld/protocol,
+  bitworld/client as bitworldClient, bitworld/profile, bitworld/spriteprotocol,
   bitworld/runtime,
   curly, mummy,
   sim, global, replays

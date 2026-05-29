@@ -1,7 +1,7 @@
 import
   std/[json, math, os, random, strutils, tables],
   bitworld/aseprite, bitworld/client as bitworldClient,
-  bitworld/pixelfonts, bitworld/profile, bitworld/protocol, bitworld/resources,
+  bitworld/pixelfonts, bitworld/profile, bitworld/spriteprotocol, bitworld/resources,
   bitworld/server,
   jsony, pixie
 
