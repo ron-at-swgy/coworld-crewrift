@@ -13,6 +13,7 @@
 !.dockerignore
 
 # Normal ignores.
+nim.cfg
 *.exe
 nimcache
 *.pdb

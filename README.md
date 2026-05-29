@@ -182,13 +182,15 @@ Upload the certified Coworld with:
 coworld upload-coworld coworld_manifest.json
 ```
 
-For the full production release flow from Crewrift `master`, including ECR
-image pushes, Coworld certification/upload, and hosted replay viewer upload,
-run:
+For the full production release flow from Crewrift `master`, including local
+linux/amd64 image builds and Coworld certification/upload, run:
 
 ```sh
-./upload.sh 0.1.24
+./upload.sh 0.1.22
 ```
+
+Crewrift serves hosted replay viewers from the game image itself; there is no
+separate replay-viewer S3 bundle to upload.
 
 ### Browser Clients
 
