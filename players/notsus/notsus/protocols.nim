@@ -1,6 +1,6 @@
 import
   std/[algorithm, options, strutils],
-  bitworld/[profile, protocol, server],
+  bitworld/[profile, bitstreamprotocol, server],
   pixie, supersnappy, whisky
 
 const

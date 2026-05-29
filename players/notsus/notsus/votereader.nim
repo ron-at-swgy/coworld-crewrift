@@ -1,6 +1,6 @@
 import
   std/strutils,
-  bitworld/[pixelfonts, profile, protocol, server],
+  bitworld/[pixelfonts, profile, bitstreamprotocol, server],
   ../../../src/crewrift/sim
 
 const

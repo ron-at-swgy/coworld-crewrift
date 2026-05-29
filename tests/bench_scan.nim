@@ -1,6 +1,6 @@
 import
   std/[algorithm, monotimes, os, parseutils, strutils, times],
-  bitworld/[protocol, server],
+  bitworld/[bitstreamprotocol, server],
   pixie,
   crewrift/sim
 

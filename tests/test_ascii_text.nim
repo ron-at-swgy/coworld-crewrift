@@ -1,6 +1,6 @@
 import
   std/[os, unittest],
-  bitworld/[pixelfonts, protocol, server],
+  bitworld/[pixelfonts, bitstreamprotocol, server],
   crewrift/sim,
   crewrift/texts
 

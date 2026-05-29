@@ -1,5 +1,5 @@
 import
-  bitworld/[protocol, server],
+  bitworld/[bitstreamprotocol, server],
   pixie,
   ../../src/crewrift/[sim, texts],
   notsus/[protocols, votereader]
