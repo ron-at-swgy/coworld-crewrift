@@ -4,6 +4,27 @@ import
   crewrift/sim,
   crewrift/server
 
+proc limitText(value: int): string =
+  ## Returns a readable text value for a numeric limit.
+  if value > 0:
+    $value
+  else:
+    "infinite"
+
+proc echoStartupConfig(
+  config: GameConfig,
+  runtimeConfig: RuntimeConfig
+) =
+  ## Prints the effective startup config without token secrets.
+  echo "Crewrift config: host=", runtimeConfig.host,
+    " port=", runtimeConfig.port,
+    " seed=", config.seed,
+    " minPlayers=", config.minPlayers,
+    " slots=", config.slots.len,
+    " maxTicks=", config.maxTicks.limitText(),
+    " maxGames=", config.maxGames.limitText(),
+    " map=", config.mapPath
+
 when isMainModule:
   let
     runtimeConfig = readRuntimeConfig()
@@ -16,6 +37,7 @@ when isMainModule:
 
   var config = defaultGameConfig()
   config.update(runtimeConfig.config)
+  config.echoStartupConfig(runtimeConfig)
   echo "Using map file: " & config.mapPath
 
   let loadReplayPath =
