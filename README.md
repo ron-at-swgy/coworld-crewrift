@@ -281,7 +281,7 @@ and `player_names[0]` belong to `slots[0]`.
     { "role": "crew", "color": "green" },
     { "role": "crew", "color": "yellow" },
     { "role": "crew", "color": "lime" },
-    { "role": "crew", "color": "pale blue" },
+    { "role": "crew", "color": "light blue" },
     { "role": "imposter", "color": "pink" },
     { "role": "imposter", "color": "orange" }
   ]
