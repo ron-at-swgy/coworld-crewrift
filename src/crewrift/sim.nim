@@ -1150,8 +1150,13 @@ proc readConfigSlots(node: JsonNode, slots: var seq[PlayerSlotConfig]) =
         CrewriftError,
         "Config field slots[" & $i & "] must be an object."
       )
+    if item.hasKey("name"):
+      raise newException(
+        CrewriftError,
+        "Config field slots[" & $i & "].name is not supported; use player_names[" &
+          $i & "] instead."
+      )
     var slot: PlayerSlotConfig
-    item.readConfigString("name", slot.name)
     item.readConfigString("token", slot.token)
     if item.hasKey("role"):
       let role = item["role"]
@@ -1172,6 +1177,34 @@ proc readConfigSlots(node: JsonNode, slots: var seq[PlayerSlotConfig]) =
       slot.color = readSlotColor(color.getStr(), i)
       slot.hasColor = true
     slots.add(slot)
+
+proc readConfigPlayerNames(node: JsonNode, slots: var seq[PlayerSlotConfig]) =
+  ## Reads optional fixed player display names by slot index.
+  if not node.hasKey("player_names"):
+    return
+  let items = node["player_names"]
+  if items.kind != JArray:
+    raise newException(CrewriftError, "Config field player_names must be an array.")
+  if items.len > MaxPlayers:
+    raise newException(
+      CrewriftError,
+      "Config field player_names cannot have more than 16 entries."
+    )
+  if slots.len < items.len:
+    slots.setLen(items.len)
+  for i, item in items.elems:
+    if item.kind != JString:
+      raise newException(
+        CrewriftError,
+        "Config field player_names[" & $i & "] must be a string."
+      )
+    let name = item.getStr()
+    if name.len == 0:
+      raise newException(
+        CrewriftError,
+        "Config field player_names[" & $i & "] must not be empty."
+      )
+    slots[i].name = name
 
 proc readConfigTokens(node: JsonNode, slots: var seq[PlayerSlotConfig]) =
   ## Reads optional fixed player slot tokens.
@@ -1243,7 +1276,7 @@ proc validate(config: GameConfig) =
         raise newException(
           CrewriftError,
           "Config field closedRoster requires slots[" & $i &
-            "] to have a name or token."
+            "] to have player_names[" & $i & "] or a token."
         )
   for i in 0 ..< config.slots.len:
     for j in i + 1 ..< config.slots.len:
@@ -1251,7 +1284,7 @@ proc validate(config: GameConfig) =
           config.slots[i].name == config.slots[j].name:
         raise newException(
           CrewriftError,
-          "Config field slots has duplicate name " & config.slots[i].name & "."
+          "Config field player_names has duplicate name " & config.slots[i].name & "."
         )
       if config.slots[i].token.len > 0 and
           config.slots[i].token == config.slots[j].token:
@@ -1313,6 +1346,7 @@ proc update*(config: var GameConfig, jsonText: string) =
   node.readConfigString("mapPath", config.mapPath)
   node.readConfigSlots(config.slots)
   node.readConfigTokens(config.slots)
+  node.readConfigPlayerNames(config.slots)
   node.readConfigBool("closedRoster", config.closedRoster)
   config.validate()
 
@@ -1335,19 +1369,22 @@ proc slotColorText(slot: PlayerSlotConfig): string =
 proc configJson*(config: GameConfig): string =
   ## Returns the complete replay JSON for a gameplay config.
   var
+    playerNames = newJArray()
     slots = newJArray()
     tokens = newJArray()
+    includePlayerNames = false
   for slot in config.slots:
     var item = newJObject()
     if slot.name.len > 0:
-      item["name"] = %slot.name
+      includePlayerNames = true
     tokens.add(%slot.token)
+    playerNames.add(%slot.name)
     if slot.hasRole:
       item["role"] = %slot.slotRoleText()
     if slot.hasColor:
       item["color"] = %slot.slotColorText()
     slots.add(item)
-  let node = %*{
+  var node = %*{
     "motionScale": config.motionScale,
     "accel": config.accel,
     "frictionNum": config.frictionNum,
@@ -1382,6 +1419,8 @@ proc configJson*(config: GameConfig): string =
     "tokens": tokens,
     "slots": slots
   }
+  if includePlayerNames:
+    node["player_names"] = playerNames
   $node
 
 proc ratioImposterCount*(playerCount: int): int =
