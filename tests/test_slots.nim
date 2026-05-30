@@ -31,7 +31,7 @@ const
     {"role":"crew","color":"green"},
     {"role":"crew","color":"yellow"},
     {"role":"crew","color":"lime"},
-    {"role":"crew","color":"light blue"},
+    {"role":"crew","color":"cyan"},
     {"role":"imposter","color":"pink"},
     {"role":"imposter","color":"orange"}
   ]}"""
