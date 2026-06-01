@@ -78,6 +78,107 @@ The game scores players based on their performance.
 
 Winning gives you the ultimate reward, but you can use the rewards for doing tasks and killing to train your agents.
 
+## Run the game locally.
+
+Run the game entirely locally, without using Docker, following these simple steps.
+
+First, you need to install Nim and sync the lock file. I recommend using Nimby.
+See https://github.com/treeform/nimby for more information.
+
+```sh
+nimby use 2.2.10
+nimby sync -g nimby.lock
+```
+
+Then, you need to build and run the game with the repo config file.
+
+```sh
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
+```
+
+Then, let's build the example bot:
+
+```sh
+nim c players/notsus/notsus.nim
+```
+
+Then, you need to run at least 8 bots in parallel.
+The source build writes the binary to `players/notsus/notsus.out`.
+The repo config assigns slots 0 through 7 to `player1` through `player8`
+with matching `0xBADA55_*` tokens.
+
+```sh
+for i in 0 1 2 3 4 5 6 7; do
+  token="0xBADA55_$i"
+  url="ws://localhost:2000/player?slot=$i&token=$token"
+  COGAMES_ENGINE_WS_URL="$url" ./players/notsus/notsus.out &
+done
+wait
+```
+
+Then you can monitor the game with the global viewer at http://localhost:2000/client/global.
+
+You can also just choose to run the game with 7 bots and 1 human player:
+
+Use one configured player URL in the browser.
+For example, open `http://localhost:2000/client/player?slot=0&token=0xBADA55_0`.
+
+## Run the game with Docker.
+
+Do not want to install or compile Nim? Use the public Softmax images.
+These commands use the repo `config.json` file and do not build any images.
+Run them from the repo root.
+
+First, create a local Docker network.
+
+```sh
+docker network create crewrift-local || true
+```
+
+Then, run the game server.
+
+```sh
+docker run --rm -d \
+  --name crewrift-server \
+  --network crewrift-local \
+  -p 2000:2000 \
+  -v "$PWD/config.json:/workspace/crewrift/config.json:ro" \
+  -e COGAME_HOST=0.0.0.0 \
+  -e COGAME_PORT=2000 \
+  -e COGAME_CONFIG_URI=file:///workspace/crewrift/config.json \
+  public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest
+```
+
+Then, run 8 `notsus` bots in parallel.
+
+```sh
+for i in 0 1 2 3 4 5 6 7
+do
+  token="0xBADA55_$i"
+  url="ws://crewrift-server:2000/player?slot=$i&token=$token"
+  docker run --rm -d \
+    --name "crewrift-bot-$i" \
+    --network crewrift-local \
+    -e COGAMES_ENGINE_WS_URL="$url" \
+    public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest
+done
+```
+
+Then you can monitor the game with the global viewer at http://localhost:2000/client/global.
+
+To stop the local Docker run:
+
+```sh
+docker rm -f crewrift-server 2>/dev/null || true
+for i in 0 1 2 3 4 5 6 7
+do
+  docker rm -f "crewrift-bot-$i" 2>/dev/null || true
+done
+```
+
 ## Coworld Contract
 
 Crewrift follows the Coworld package contract defined by Metta's `coworld` package:
@@ -150,11 +251,13 @@ They are useful for running the game locally, changing game mechanics, or debugg
 
 ### Run The Server
 
-From the game folder:
+From the repo root:
 
 ```sh
-cd /path/to/coworld-crewrift
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"minPlayers":8,"imposterCount":2,"tasksPerPlayer":8,"killCooldownTicks":900,"voteTimerTicks":6000}'
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
 ```
 
 Useful config fields:
@@ -167,22 +270,13 @@ Useful config fields:
 - `buttonCalls`: emergency button calls allowed per player.
 - `mapPath`: resource map file to load. The default is `data/croatoan.resources`.
 
-You can also load config from a file:
+You can load another config file through the Coworld runner environment:
 
 ```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config-file:config.json
-```
-
-The same config file can be provided through the Coworld runner environment:
-
-```sh
-COGAME_CONFIG_URI=file://$PWD/config.json nim r src/crewrift.nim --address:0.0.0.0 --port:2000
-```
-
-For the first source-level test, it is useful to run one player with one task and no imposters:
-
-```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"minPlayers":1,"imposterCount":0,"tasksPerPlayer":1}'
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
 ```
 
 ### Runner Environment
@@ -192,6 +286,8 @@ Command-line flags override these values when both are set.
 
 | Variable | Meaning |
 | --- | --- |
+| `COGAME_HOST` | Host address to bind |
+| `COGAME_PORT` | Port to bind |
 | `COGAME_CONFIG_URI` | URI for the config JSON file |
 | `COGAME_RESULTS_URI` | URI where final scores are written |
 | `COGAME_SAVE_REPLAY_URI` | Optional URI where a replay is written |
@@ -200,10 +296,12 @@ Command-line flags override these values when both are set.
 Results are written when `maxGames` is set to 1 or higher.
 
 ```sh
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
 COGAME_CONFIG_URI=file://$PWD/config.json \
 COGAME_RESULTS_URI=file://$PWD/scores.json \
 COGAME_SAVE_REPLAY_URI=file://$PWD/run.bitreplay \
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000
+nim r src/crewrift.nim
 ```
 
 ### Coworld Certification
@@ -260,12 +358,15 @@ Run the server in one shell, then run a bot from the repo root in another shell.
 The bundled source-level baseline is `notsus`.
 
 ```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"minPlayers":1,"imposterCount":0,"tasksPerPlayer":1}'
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
 ```
 
 ```sh
-COGAMES_ENGINE_WS_URL='ws://localhost:2000/player?slot=0&token=' \
-nim r players/notsus/notsus.nim -- --name notsus
+COGAMES_ENGINE_WS_URL='ws://localhost:2000/player?slot=0&token=0xBADA55_0' \
+nim r players/notsus/notsus.nim
 ```
 
 ### Map Files
@@ -275,16 +376,14 @@ It controls task stations, vents, and room names.
 It is paired with `data/croatoan.aseprite`, whose layers provide the map, walkability, and walls.
 Map images currently need to be `1235x659`.
 
-Use a different map with `--map`:
+Use a different map by changing `mapPath` in `config.json`.
+Then run the server with the same config command:
 
 ```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --map:data/croatoan.resources
-```
-
-Or set it in config:
-
-```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"mapPath":"data/croatoan.resources","minPlayers":8}'
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
 ```
 
 ### Slot Config For Source Tests
