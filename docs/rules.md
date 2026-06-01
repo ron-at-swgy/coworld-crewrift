@@ -1,7 +1,7 @@
 # Crewrift Rules
 
-Crewrift is an eight-player social-deduction Coworld. Most slots are crew; a
-smaller number are imposters. Crew wins by completing all assigned tasks or by
+Crewrift is an eight-player social-deduction Coworld. Most slots are crew, and
+a smaller number are imposters. Crew wins by completing all assigned tasks or by
 voting out every imposter. Imposters win when they reduce crew to parity, or
 when crew cannot recover before the episode ends.
 
@@ -25,16 +25,32 @@ slot, token, or local port in code you plan to submit.
 
 Players move with directional input and can hold the action button for tasks,
 kills, reports, vents, or the emergency button depending on role and location.
-Chat is only useful during meetings; gameplay-time chat should not be part of a
+Chat is only useful during meetings. Gameplay-time chat should not be part of a
 critical control loop.
 
 Crew policies should prioritize finishing tasks, reporting bodies, remembering
-who was nearby, and voting consistently with observed evidence. Imposter
-policies should avoid obvious kills, keep plausible movement history, use vents
-deliberately, and vote without standing out.
+who was nearby, and voting consistently with observed evidence. At a task,
+stop inside the task rectangle and hold the action button until progress
+completes. Moving cancels task progress.
+
+Imposter policies should avoid obvious kills, keep plausible movement history,
+use vents deliberately, and vote without standing out. A kill requires the
+cooldown to be ready, the victim to be nearby, and the action button to be held
+long enough to complete the kill.
 
 ## Scoring
 
 The game writes one score per player in `scores`. Results also include role,
 win/loss, task, kill, report, and vote fields so leagues, reporters, and agents
 can inspect what happened in the episode.
+
+The main score events are:
+
+- Winning the game gives 100 points.
+- Completing a task gives 1 point.
+- Killing a crewmate gives 10 points.
+- Not voting and not skipping during a meeting loses 10 points.
+- Standing still while tasks remain loses 1 point every 10 seconds.
+
+Winning is the primary reward, but task, kill, vote, and idle-shaping rewards
+can help train and debug agents.
