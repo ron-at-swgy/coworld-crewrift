@@ -3,7 +3,7 @@
 ![Crewrift](docs/crewrift.png)
 
 Crewrift is a Coworld social-deduction game. Crewmates complete tasks, report bodies, chat during meetings, and vote out
-suspects. Imposters blend in, use cooldown-limited kills, and survive the vote.
+suspects. Imposters blend in, use cooldown-limited kills, vent around the map, and survive the vote.
 
 This README is the game-owned guide. It explains how Crewrift works, what a player process must do, how to use or modify
 the bundled `notsus` baseline, and what game-specific mistakes to check first. The Softmax league guide owns Docker,
@@ -42,15 +42,60 @@ Imposters win by:
 Each player sees the game through the Sprite v1 player protocol. The game also writes results with per-slot scores, role,
 win/loss, task counts, kill counts, report counts, and voting statistics.
 
-Important mechanics:
+### Starting The Game
 
-- Crewmates receive task locations and should move to task stations to complete them.
-- Dead bodies can be reported when a player is close enough.
-- Meetings pause movement and switch players into chat and voting.
-- Imposters can kill nearby crewmates after their kill cooldown is ready.
-- Vents are useful for imposters but are suspicious if they create implausible movement.
-- Emergency button calls are limited.
-- Vote timing matters. A player that waits too long may lose the chance to vote.
+Players connect and wait until the configured roster is ready. When the game starts, each player receives either a crew
+or imposter role.
+
+### Being A Crewmate
+
+Crewmates start near the emergency button. They receive task locations, move to task stations, press A, and stand still
+until the task progress bar completes. Moving interrupts task progress.
+
+Useful crew behavior:
+
+- move toward task stations instead of wandering;
+- stay close enough to other crew to create witnesses;
+- report nearby bodies;
+- use emergency button calls sparingly;
+- vote only when the evidence is strong enough to justify the risk.
+
+Voting out another crewmate can lose the game, so crew policies should prefer evidence-grounded votes over random
+accusations.
+
+### Being An Imposter
+
+Imposters should look like crewmates until a good kill is available. Their kill progress bar fills over time. When it is
+ready, an imposter can stand next to a victim and press A to kill. Imposters can also use vents to move faster and hide,
+but implausible vent movement is suspicious.
+
+Useful imposter behavior:
+
+- blend in by moving like a task-seeking crewmate;
+- avoid kills when another player is visibly nearby;
+- leave bodies quickly after a kill;
+- use vents when the resulting movement can plausibly avoid detection;
+- vote against crew when it helps move the game toward parity.
+
+### Voting
+
+Bodies and emergency button calls start meetings. During a meeting, players can chat and vote. A player can vote for a
+suspect or skip. Once a vote is cast, it cannot be changed.
+
+Vote timing matters. A policy that waits too long may lose the chance to vote and can take a score penalty for not voting
+or skipping.
+
+### Scoring
+
+The game scores players based on their performance:
+
+- winning the game: +100 points;
+- completing a task: +1 point;
+- killing a crewmate: +10 points;
+- not voting and not skipping votes: -10 points;
+- standing still while holding tasks: -1 point every 10 seconds.
+
+The win reward dominates, but task, kill, vote, and stuck penalties are useful training signals.
 
 ## Player Runtime
 
@@ -109,28 +154,28 @@ timer expires, and avoiding obviously suspicious imposter behavior.
 
 ## Policy FAQ
 
-### Can I submit the bundled `notsus` image unchanged?
+### Can I Submit The Bundled `notsus` Image Unchanged?
 
 Use `notsus` first as a baseline for local verification. The Softmax play guide explains the current upload and
 submission flow if you want to submit any image to a league.
 
-### What should I copy from `notsus`?
+### What Should I Copy From `notsus`?
 
 Copy the Sprite protocol handling before copying the strategy. A policy that decodes observations and sends valid input
 packets reliably is easier to improve than a clever policy with a fragile websocket loop.
 
-### How does my policy know its slot?
+### How Does My Policy Know Its Slot?
 
 Read the `slot` query parameter from `COWORLD_PLAYER_WS_URL`. Do not guess it. The runner may assign any submitted policy
 to any slot.
 
-### How does voting work?
+### How Does Voting Work?
 
 During meetings, the visual state changes to a voting screen. `notsus` parses the vote cursor and vote cells from Sprite
 objects. If your actions do nothing during voting, compare your input encoding and vote-screen detection with
 `players/notsus/notsus/votereader.nim`.
 
-### What should I inspect after a bad episode?
+### What Should I Inspect After A Bad Episode?
 
 Start with the replay and policy logs from the Softmax or local Coworld run. For Crewrift-specific failures, check:
 
@@ -232,11 +277,16 @@ nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"mapPath":"data/
 ### Coworld Releases
 
 Production Coworld releases are owned by the Metta repository's canonical `worlds/crewrift` entry. From a Metta checkout,
-point the build contexts at this Crewrift checkout and run the shared uploader:
+point the build contexts at the source checkouts and run the shared uploader:
 
 ```sh
 GAME_CONTEXT=/path/to/coworld-crewrift \
 PLAYER_CONTEXT=/path/to/coworld-crewrift \
+REPORTER_CONTEXT=/path/to/reporters/reporters \
+GRADER_CONTEXT=/path/to/graders \
+DIAGNOSER_CONTEXT=/path/to/diagnosers/diagnosers/crewrift/crewrift_diagnoser \
+OPTIMIZER_CONTEXT=/path/to/optimizers \
+COMMISSIONER_CONTEXT=/path/to/commissioners \
 worlds/upload.sh crewrift <version>
 ```
 
