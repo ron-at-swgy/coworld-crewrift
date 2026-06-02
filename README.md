@@ -1,207 +1,258 @@
-# Crewrift
+# Crewrift - AI Social Deductions Sandbox
 
 ![Crewrift](docs/crewrift.png)
 
-Crewrift is a Coworld social-deduction game. Crewmates complete tasks, report bodies, chat during meetings, and vote out
-suspects. Imposters blend in, use cooldown-limited kills, vent around the map, and survive the vote.
+Crewrift is a Coworld social deduction game.
+Crewmates complete tasks, report bodies, chat during meetings, and vote out suspects.
+Imposters blend in, use cooldown-limited kills, and survive the vote.
 
-This README is the game-owned guide. It explains how Crewrift works, what a player process must do, how to use or modify
-the bundled `notsus` baseline, and what game-specific mistakes to check first. The Softmax league guide owns Docker,
-`coworld download`, policy upload, league submission, placement matches, standings, logs, and replays:
+Most players do not need this repository.
+The public path is:
 
-<https://softmax.com/play_crewrift.md>
+1. Write a player process that connects to the runner-supplied websocket URL.
+2. Package it as a Linux Docker image.
+3. Upload it with `coworld upload-policy`.
+4. Submit it with `coworld submit`.
 
-## Public Docs
+The game source in this directory is useful when developing the game container, debugging the protocol, or studying the reference bots.
+Treat it as a source reference, not as a prerequisite for competing.
 
-The uploaded Coworld manifest points at these public documents:
+Public docs:
 
-| Purpose | Owner | URL |
-| --- | --- | --- |
-| Crewrift game README | Crewrift | <https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md> |
-| Player protocol | Bitworld | <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md> |
-| Global/replay protocol | Bitworld | <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md> |
-| Softmax play guide | Softmax | <https://softmax.com/play_crewrift.md> |
-
-Keep game rules, strategy, game-specific player guidance, and FAQs in this README. Keep Softmax account setup, Coworld
-CLI installation, policy upload, and tournament submission instructions in the Softmax play guide.
+- Crewrift README: <https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md>
+- Player protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
+- Global/replay protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
+- Softmax play guide: <https://softmax.com/play_crewrift.md>
 
 ## Crewrift Rules
 
-Crewrift runs an eight-player match by default. Most slots are crew. A smaller number are imposters.
+Crewrift is a multiplayer social deduction Coworld used for social AI benchmarks. Sandbox to make the AI learn and grow in a confined game environment.
 
-Crew wins by:
+Most players are **crewmates**, among them there are some **imposters**.
+**Crewmates** win by completing tasks or by voting out all **imposters**.
+**Imposters** win by eliminating enough crew players.
 
-- completing all assigned tasks; or
-- voting out every imposter.
+### Starting the Game
 
-Imposters win by:
+Players connect to the game and wait until there are enough players to start the game.
+Then the game shows them their assigned role, either a crew or an imposter role.
 
-- reducing crew to parity; or
-- delaying crew long enough that the episode ends before crew can recover.
+### Being a Crewmate
 
-Each player sees the game through the Sprite v1 player protocol. The game also writes results with per-slot scores, role,
-win/loss, task counts, kill counts, report counts, and voting statistics.
+The players start out next to the **emergency button**.
+Any player can press the **emergency button** to start the vote, but they can only do that once per game.
+The crew players need to complete tasks, which requires looking at the task radar view, going there, and navigating around walls.
+Once at the task, the crewmate needs to press the A button and stand still until the task progress bar is complete.
+If the crewmate moves for any reason, they need to restart the task.
 
-### Starting The Game
+*Strategy:* It is advantageous for the **crewmates** to stick together. This way, if someone kills one of the **crewmates** in a group, all the other **crewmates** will know who that is. It is also advantageous to stick together so that during the voting phase the **crewmates** can vouch for each other.
 
-Players connect and wait until the configured roster is ready. When the game starts, each player receives either a crew
-or imposter role.
+### Being an Imposter
 
-### Being A Crewmate
+An imposter has a different role.
+First, they should blend in by acting like a crewmate.
+The **imposters** have a kill progress bar, it starts out empty and slowly fills.
+When the kill progress bar is fully filled, they can kill.
+They need to stand next to the victim and press the A button to kill.
+**Imposters** also have access to vents, which allow them to move around the map faster and hide from **crewmates**.
 
-Crewmates start near the emergency button. They receive task locations, move to task stations, press A, and stand still
-until the task progress bar completes. Moving interrupts task progress.
-
-Useful crew behavior:
-
-- move toward task stations instead of wandering;
-- stay close enough to other crew to create witnesses;
-- report nearby bodies;
-- use emergency button calls sparingly;
-- vote only when the evidence is strong enough to justify the risk.
-
-Voting out another crewmate can lose the game, so crew policies should prefer evidence-grounded votes over random
-accusations.
-
-### Being An Imposter
-
-Imposters should look like crewmates until a good kill is available. Their kill progress bar fills over time. When it is
-ready, an imposter can stand next to a victim and press A to kill. Imposters can also use vents to move faster and hide,
-but implausible vent movement is suspicious.
-
-Useful imposter behavior:
-
-- blend in by moving like a task-seeking crewmate;
-- avoid kills when another player is visibly nearby;
-- leave bodies quickly after a kill;
-- use vents when the resulting movement can plausibly avoid detection;
-- vote against crew when it helps move the game toward parity.
+*Strategy:* It is advantageous for **imposters** to blend in and do almost everything that the crewmate does. Even maybe "faking" doing tasks, standing still where a task needs to be done. The imposters need to kill quickly because the cooldown timers are long, and if they wait too long, the **crewmates** will complete all the tasks and the **imposters** will lose. When an **imposter** kills someone and there is a body, and then they should run away from that location as far as possible. Either using vents or using normal corridors, they need to be away from the bodies so they are not implicated in the crime.
 
 ### Voting
 
-Bodies and emergency button calls start meetings. During a meeting, players can chat and vote. A player can vote for a
-suspect or skip. Once a vote is cast, it cannot be changed.
+Once someone is killed, a body appears.
+Both crewmate and imposter can report the body.
+When **imposters** do, it is called "self report".
+Once, the body is reported, the voting starts.
+Voting can also start if someone hits the **emergency button**.
+During the voting phase, players can talk to each other and vote.
+They can use the left and right keys to select whoever they want to vote for, or they can choose to skip.
+Once a vote is cast, they can't change their vote.
 
-Vote timing matters. A policy that waits too long may lose the chance to vote and can take a score penalty for not voting
-or skipping.
+*Strategy:* It is advantageous for **crewmates** to be extremely careful about voting because voting another **crewmate** out will probably lose them the game. They need to be absolutely sure.
+While for the **imposters**, it is beneficial to vote all the time, vote against any **crewmate** because any **crewmate** that's eliminated is one less they have to kill and means a much higher chance of winning the game.
+It is beneficial for the **imposters** to try to confuse the other **crewmates**, and it is important for the **crewmates** to perform good deductive reasoning to figure out who are the **imposters**.
 
 ### Scoring
 
-The game scores players based on their performance:
+The game scores players based on their performance.
 
-- winning the game: +100 points;
-- completing a task: +1 point;
-- killing a crewmate: +10 points;
-- not voting and not skipping votes: -10 points;
-- standing still while holding tasks: -1 point every 10 seconds.
+* Winning the game +100 points.
+* Completing a task +1 point.
+* Killing a crewmate +10 points.
+* Not voting and not skipping votes -10 points.
+* Standing still and having tasks to do -1 point every 10 seconds.
 
-The win reward dominates, but task, kill, vote, and stuck penalties are useful training signals.
+Winning gives you the ultimate reward, but you can use the rewards for doing tasks and killing to train your agents.
 
-## Player Runtime
+## Run the game locally.
 
-In hosted and local Coworld episodes, the runner starts one game container and one policy container per player slot. Each
-policy container receives a complete player websocket URL:
+Run the game entirely locally, without using Docker, following these simple steps.
 
-```text
-COWORLD_PLAYER_WS_URL=ws://<game-service>:8080/player?slot=<slot>&token=<token>
-```
-
-Connect to that URL exactly as supplied. The runner owns slot assignment and token generation. Do not hardcode a slot,
-guess a token, or connect to a local Crewrift server in a policy image you plan to submit.
-
-The player websocket uses Sprite v1:
-
-- Player protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
-- Global/replay viewer protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
-
-A player can be written in any language as long as its container starts the player process, connects to
-`COWORLD_PLAYER_WS_URL`, reads Sprite updates, sends valid Sprite input packets, keeps the control loop responsive, and
-exits when the episode ends.
-
-## Policy Starting Points
-
-Choose one of three paths:
-
-1. **Use the stock baseline.** The uploaded Coworld includes a bundled `notsus` image. Use it to verify that the game
-   package runs locally and to inspect a working replay before writing code.
-2. **Improve `notsus`.** Copy or fork `players/notsus`. This is the best route when you want working Sprite parsing,
-   movement, task targeting, and voting logic before adding your own strategy.
-3. **Start from scratch.** Implement Sprite v1 directly in the language you prefer. Use `notsus` only as a protocol and
-   behavior reference.
-
-The `notsus` source is intentionally public and lives in this repo:
-
-- `players/notsus/notsus.nim`: player entrypoint and strategy loop.
-- `players/notsus/notsus/protocols.nim`: Sprite update parsing and input encoding.
-- `players/notsus/notsus/votereader.nim`: meeting and vote cursor parsing.
-- `players/notsus/Dockerfile`: Linux image for the baseline player.
-
-## Policy Strategy
-
-A useful Crewrift policy does more than move randomly. Start with small, observable improvements:
-
-- keep a current map position and target;
-- move toward visible task stations as crew;
-- report nearby bodies;
-- remember who was nearby before a meeting;
-- vote consistently from evidence instead of always skipping;
-- as imposter, avoid kills when another player is visibly nearby;
-- as imposter, use vents only when the resulting movement is plausible;
-- keep LLM calls asynchronous or bounded so the policy still sends timely actions.
-
-The strongest early policies usually win by staying connected, moving consistently, completing tasks, voting before the
-timer expires, and avoiding obviously suspicious imposter behavior.
-
-## Policy FAQ
-
-### Can I Submit The Bundled `notsus` Image Unchanged?
-
-Use `notsus` first as a baseline for local verification. The Softmax play guide explains the current upload and
-submission flow if you want to submit any image to a league.
-
-### What Should I Copy From `notsus`?
-
-Copy the Sprite protocol handling before copying the strategy. A policy that decodes observations and sends valid input
-packets reliably is easier to improve than a clever policy with a fragile websocket loop.
-
-### How Does My Policy Know Its Slot?
-
-Read the `slot` query parameter from `COWORLD_PLAYER_WS_URL`. Do not guess it. The runner may assign any submitted policy
-to any slot.
-
-### How Does Voting Work?
-
-During meetings, the visual state changes to a voting screen. `notsus` parses the vote cursor and vote cells from Sprite
-objects. If your actions do nothing during voting, compare your input encoding and vote-screen detection with
-`players/notsus/notsus/votereader.nim`.
-
-### What Should I Inspect After A Bad Episode?
-
-Start with the replay and policy logs from the Softmax or local Coworld run. For Crewrift-specific failures, check:
-
-- whether the policy ever connected to `COWORLD_PLAYER_WS_URL`;
-- whether it kept sending valid Sprite input packets;
-- whether it moved toward task or body markers;
-- whether it voted before the timer expired;
-- whether imposter kills happened in visible, suspicious locations;
-- whether LLM or network calls blocked the control loop.
-
-## Source Development
-
-The remaining sections are for Crewrift source development. They are useful for changing game mechanics, debugging the
-reference player, or preparing a new Coworld release. They are not required for normal Softmax league participation.
-
-### Run Locally Without Docker
-
-Run the game entirely locally when changing source code. First, install Nim and sync the lock file. Nimby is the
-recommended local Nim installer:
+First, you need to install Nim and sync the lock file. I recommend using Nimby.
+See https://github.com/treeform/nimby for more information.
 
 ```sh
 nimby use 2.2.10
 nimby sync -g nimby.lock
 ```
 
-Build and run the game with the repository config:
+Then, you need to build and run the game with the repo config file.
+
+```sh
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
+```
+
+Then, let's build the example bot:
+
+```sh
+nim c players/notsus/notsus.nim
+```
+
+Then, you need to run at least 8 bots in parallel.
+The source build writes the binary to `players/notsus/notsus.out`.
+The repo config assigns slots 0 through 7 to `player1` through `player8`
+with matching `0xBADA55_*` tokens.
+
+```sh
+for i in 0 1 2 3 4 5 6 7; do
+  token="0xBADA55_$i"
+  url="ws://localhost:2000/player?slot=$i&token=$token"
+  COWORLD_PLAYER_WS_URL="$url" ./players/notsus/notsus.out &
+done
+wait
+```
+
+Then you can monitor the game with the global viewer at http://localhost:2000/client/global.
+
+You can also just choose to run the game with 7 bots and 1 human player:
+
+Use one configured player URL in the browser.
+For example, open `http://localhost:2000/client/player?slot=0&token=0xBADA55_0`.
+
+## Run the game with Docker.
+
+Do not want to install or compile Nim? Use the public Softmax images.
+These commands use the repo `config.json` file and do not build any images.
+Run them from the repo root.
+
+First, create a local Docker network.
+
+```sh
+docker network create crewrift-local || true
+```
+
+Then, run the game server.
+
+```sh
+docker run --rm -d \
+  --name crewrift-server \
+  --network crewrift-local \
+  -p 2000:2000 \
+  -v "$PWD/config.json:/workspace/crewrift/config.json:ro" \
+  -e COGAME_HOST=0.0.0.0 \
+  -e COGAME_PORT=2000 \
+  -e COGAME_CONFIG_URI=file:///workspace/crewrift/config.json \
+  public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest
+```
+
+Then, run 8 `notsus` bots in parallel.
+
+```sh
+for i in 0 1 2 3 4 5 6 7
+do
+  token="0xBADA55_$i"
+  url="ws://crewrift-server:2000/player?slot=$i&token=$token"
+  docker run --rm -d \
+    --name "crewrift-bot-$i" \
+    --network crewrift-local \
+    -e COWORLD_PLAYER_WS_URL="$url" \
+    public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest
+done
+```
+
+Then you can monitor the game with the global viewer at http://localhost:2000/client/global.
+
+To stop the local Docker run:
+
+```sh
+docker rm -f crewrift-server 2>/dev/null || true
+for i in 0 1 2 3 4 5 6 7
+do
+  docker rm -f "crewrift-bot-$i" 2>/dev/null || true
+done
+```
+
+## Coworld Contract
+
+Crewrift follows the Coworld package contract defined by Metta's `coworld` package:
+
+- Coworld spec: <https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/COWORLD_README.md>
+- Cogame runtime spec: <https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/COGAME_README.md>
+- Runner contract: <https://github.com/Metta-AI/metta/blob/main/packages/coworld/src/coworld/runner/RUNNER_README.md>
+
+The uploaded Coworld manifest is `coworld_manifest.json`.
+It defines the game image, the default eight-player, two-imposter tournament variant with eight tasks per crewmate, the certification fixture, public protocol docs, and the public pages that Observatory renders for the uploaded Coworld.
+
+Coworld uploads store documentation as public URLs.
+They do not bundle local Markdown files into the uploaded manifest, so keep the manifest docs links pointing at public pages that policy authors and coding agents can read without a Crewrift checkout.
+
+## Player Runtime
+
+In hosted Coworld episodes, Softmax runs the game container and each policy container separately.
+Each policy container receives:
+
+```text
+COWORLD_PLAYER_WS_URL=ws://<game-service>:8080/player?slot=<slot>&token=<token>
+```
+
+Connect to that URL exactly as supplied.
+The runner owns slot assignment and token generation.
+Do not hardcode a slot, guess a token, or connect to a local Crewrift server in hosted play.
+
+The bundled `notsus` source bot reads `COWORLD_PLAYER_WS_URL`; new policies should use that URL exactly as supplied.
+
+The player websocket uses Sprite v1:
+
+- Player protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
+- Global/replay viewer protocol: <https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md>
+
+A player can be written in any language as long as its container starts the player process, connects to the runner-supplied websocket URL, reads sprite updates, and sends valid sprite input packets.
+
+## Playing And Submitting
+
+Use the public play prompt for the current CLI install and submit flow:
+
+```text
+https://softmax.com/play_crewrift.md
+```
+
+The durable command shape is:
+
+```sh
+softmax login
+docker buildx build --platform linux/amd64 -t my-crewrift-policy:latest --load .
+coworld upload-policy my-crewrift-policy:latest --name my-policy
+coworld submit my-policy:v1 --league <crewrift-league-id>
+```
+
+If a policy needs API keys or other credentials at runtime, attach them to the policy version with `coworld upload-policy --secret-env KEY=VALUE`.
+Do not bake secrets into the image.
+
+For policy design and packaging details, use the public Crewrift README, Bitworld Sprite v1 protocol, and Softmax play
+guide links above.
+
+## Source Development
+
+The remaining sections are for Crewrift source development.
+They are useful for running the game locally, changing game mechanics, or debugging the reference players, but they are not required for uploaded Coworld play.
+
+### Run The Server
+
+From the repo root:
 
 ```sh
 COGAME_HOST=0.0.0.0 \
@@ -220,100 +271,19 @@ Useful config fields:
 - `buttonCalls`: emergency button calls allowed per player.
 - `mapPath`: resource map file to load. The default is `data/croatoan.resources`.
 
-Build the example bot:
+You can load another config file through the Coworld runner environment:
 
 ```sh
-nim c players/notsus/notsus.nim
-```
-
-Run eight bots in parallel. The source build writes the binary to `players/notsus/notsus.out`. The repo config assigns
-slots 0 through 7 to `player1` through `player8` with matching `0xBADA55_*` tokens.
-
-```sh
-for i in 0 1 2 3 4 5 6 7; do
-  token="0xBADA55_$i"
-  url="ws://localhost:2000/player?slot=$i&token=$token"
-  COWORLD_PLAYER_WS_URL="$url" ./players/notsus/notsus.out &
-done
-wait
-```
-
-Then monitor the game with the global viewer at <http://localhost:2000/client/global>. You can also run seven bots and
-one human player by opening a configured player URL in a browser, for example:
-
-```text
-http://localhost:2000/client/player?slot=0&token=0xBADA55_0
-```
-
-For a one-player source-level test:
-
-```sh
-nim r src/crewrift.nim --address:0.0.0.0 --port:2000 --config:'{"minPlayers":1,"imposterCount":0,"tasksPerPlayer":1}'
-```
-
-Then run `notsus` in another shell:
-
-```sh
-COWORLD_PLAYER_WS_URL='ws://localhost:2000/player?slot=0&token=' \
-nim r players/notsus/notsus.nim -- --name notsus
-```
-
-### Run Locally With Docker
-
-Use the public Softmax images when you want to run the source repo config without compiling Nim locally. These commands
-use `config.json` and do not build new images.
-
-Create a local Docker network:
-
-```sh
-docker network create crewrift-local || true
-```
-
-Run the game server:
-
-```sh
-docker run --rm -d \
-  --name crewrift-server \
-  --network crewrift-local \
-  -p 2000:2000 \
-  -v "$PWD/config.json:/workspace/crewrift/config.json:ro" \
-  -e COGAME_HOST=0.0.0.0 \
-  -e COGAME_PORT=2000 \
-  -e COGAME_CONFIG_URI=file:///workspace/crewrift/config.json \
-  public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest
-```
-
-Run eight `notsus` bots in parallel:
-
-```sh
-for i in 0 1 2 3 4 5 6 7
-do
-  token="0xBADA55_$i"
-  url="ws://crewrift-server:2000/player?slot=$i&token=$token"
-  docker run --rm -d \
-    --name "crewrift-bot-$i" \
-    --network crewrift-local \
-    -e COWORLD_PLAYER_WS_URL="$url" \
-    public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest
-done
-```
-
-Then monitor the game with the global viewer at <http://localhost:2000/client/global>.
-
-To stop the local Docker run:
-
-```sh
-docker rm -f crewrift-server 2>/dev/null || true
-for i in 0 1 2 3 4 5 6 7
-do
-  docker rm -f "crewrift-bot-$i" 2>/dev/null || true
-done
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
 ```
 
 ### Runner Environment
 
-Coworld runners configure file URIs with environment variables. Command-line flags override these values when both are
-set.
+Coworld runners configure file URIs with environment variables.
+Command-line flags override these values when both are set.
 
 | Variable | Meaning |
 | --- | --- |
@@ -335,6 +305,42 @@ COGAME_SAVE_REPLAY_URI=file://$PWD/run.bitreplay \
 nim r src/crewrift.nim
 ```
 
+### Coworld Certification
+
+Certification is for Coworld authors changing the game package.
+From the repository root, build the local game and baseline player images before running the certifier:
+
+```sh
+docker build \
+  --platform=linux/amd64 \
+  -f Dockerfile \
+  -t public.ecr.aws/s3j4p9s7/treeform/games/crewrift:latest \
+  .
+docker build \
+  --platform=linux/amd64 \
+  -f players/notsus/Dockerfile \
+  -t public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest \
+  .
+coworld certify coworld_manifest.json
+```
+
+Upload the certified Coworld with:
+
+```sh
+coworld upload-coworld coworld_manifest.json
+```
+
+Production Coworld releases are owned by the Metta repository's canonical `worlds/crewrift` entry.
+From a Metta checkout, point the build contexts at this Crewrift checkout and run:
+
+```sh
+GAME_CONTEXT=/path/to/coworld-crewrift \
+PLAYER_CONTEXT=/path/to/coworld-crewrift \
+worlds/crewrift/upload.sh 0.1.22
+```
+
+Crewrift serves hosted replay viewers from the game image itself; there is no separate replay-viewer S3 bundle to upload.
+
 ### Browser Clients
 
 The game container serves these routes:
@@ -345,14 +351,31 @@ The game container serves these routes:
 - Admin panel: `http://localhost:2000/client/admin`
 - Rewards: `http://localhost:2000/client/rewards`
 
-The clients connect to the game-owned websocket routes on the same host: `/player`, `/global`, `/replay`, `/admin`, and
-`/reward`.
+The clients connect to the game-owned websocket routes on the same host: `/player`, `/global`, `/replay`, `/admin`, and `/reward`.
+
+### Run Local AI Players
+
+Run the server in one shell, then run a bot from the repo root in another shell.
+The bundled source-level baseline is `notsus`.
+
+```sh
+COGAME_HOST=0.0.0.0 \
+COGAME_PORT=2000 \
+COGAME_CONFIG_URI=file://$PWD/config.json \
+nim r src/crewrift.nim
+```
+
+```sh
+COWORLD_PLAYER_WS_URL='ws://localhost:2000/player?slot=0&token=0xBADA55_0' \
+nim r players/notsus/notsus.nim
+```
 
 ### Map Files
 
-The default map is `data/croatoan.resources`. It controls task stations, vents, and room names. It is paired with
-`data/croatoan.aseprite`, whose layers provide the map, walkability, and walls. Map images currently need to be
-`1235x659`.
+The default map is `data/croatoan.resources`.
+It controls task stations, vents, and room names.
+It is paired with `data/croatoan.aseprite`, whose layers provide the map, walkability, and walls.
+Map images currently need to be `1235x659`.
 
 Use a different map by changing `mapPath` in `config.json`.
 Then run the server with the same config command:
@@ -364,32 +387,45 @@ COGAME_CONFIG_URI=file://$PWD/config.json \
 nim r src/crewrift.nim
 ```
 
-### Coworld Releases
+### Slot Config For Source Tests
 
-Production Coworld releases are owned by the Metta repository's canonical `worlds/crewrift` entry. From a Metta checkout,
-point the build contexts at the source checkouts and run the shared uploader:
+The `tokens`, `players`, and `slots` arrays match by index, so `tokens[0]` and `players[0].name` belong to `slots[0]`.
 
-```sh
-GAME_CONTEXT=/path/to/coworld-crewrift \
-PLAYER_CONTEXT=/path/to/coworld-crewrift \
-REPORTER_CONTEXT=/path/to/reporters/reporters \
-GRADER_CONTEXT=/path/to/graders \
-DIAGNOSER_CONTEXT=/path/to/diagnosers/diagnosers/crewrift/crewrift_diagnoser \
-OPTIMIZER_CONTEXT=/path/to/optimizers \
-COMMISSIONER_CONTEXT=/path/to/commissioners \
-worlds/upload.sh crewrift <version>
+```json
+{
+  "maxGames": 1,
+  "killCooldownTicks": 100,
+  "tokens": [
+    "0xBADA55_0",
+    "0xBADA55_1",
+    "0xBADA55_2",
+    "0xBADA55_3",
+    "0xBADA55_4",
+    "0xBADA55_5",
+    "0xBADA55_6",
+    "0xBADA55_7"
+  ],
+  "players": [
+    { "name": "player1" },
+    { "name": "player2" },
+    { "name": "player3" },
+    { "name": "player4" },
+    { "name": "player5" },
+    { "name": "player6" },
+    { "name": "player7" },
+    { "name": "player8" }
+  ],
+  "slots": [
+    { "role": "crew", "color": "red" },
+    { "role": "crew", "color": "blue" },
+    { "role": "crew", "color": "green" },
+    { "role": "crew", "color": "yellow" },
+    { "role": "crew", "color": "lime" },
+    { "role": "crew", "color": "pale blue" },
+    { "role": "imposter", "color": "pink" },
+    { "role": "imposter", "color": "orange" }
+  ]
+}
 ```
 
-The uploader builds the game and bundled `notsus` images, materializes the manifest, runs certification, and uploads the
-new Coworld package.
-
-Crewrift serves hosted replay viewers from the game image itself; there is no separate replay-viewer S3 bundle to
-upload.
-
-### Tests
-
-Run the source test suite from the repository root:
-
-```sh
-nim r tests/tests.nim
-```
+When a game finishes with `maxGames` set to 1 or higher, `COGAME_RESULTS_URI` writes scores using the JSON result schema from `coworld_manifest.json`.
