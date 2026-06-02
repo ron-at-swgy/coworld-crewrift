@@ -356,40 +356,40 @@
       },
       "pages": [
         {
-          "id": "rules.md",
+          "id": "rules",
           "title": "Rules",
           "content": {
             "type": "uri",
-            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/docs/rules.md"
+            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md"
           }
         },
         {
-          "id": "play_crewrift.md",
+          "id": "play",
           "title": "Play Crewrift Daily",
           "content": {
             "type": "uri",
-            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/docs/play_crewrift.md"
+            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md"
           }
         },
         {
-          "id": "sprite_v1.md",
-          "title": "sprite_v1.md",
+          "id": "player_protocol",
+          "title": "Playing Protocol",
           "content": {
             "type": "uri",
             "value": "https://github.com/Metta-AI/bitworld/blob/master/docs/sprite_v1.md"
           }
         },
         {
-          "id": "reward_v1.md",
-          "title": "reward_v1.md",
+          "id": "reward_protocol",
+          "title": "Reward Protocol",
           "content": {
             "type": "uri",
             "value": "https://github.com/Metta-AI/bitworld/blob/master/docs/reward_v1.md"
           }
         },
         {
-          "id": "bitreplay_spec.md",
-          "title": "bitreplay_spec.md",
+          "id": "global_protocol",
+          "title": "Global Protocol",
           "content": {
             "type": "uri",
             "value": "https://github.com/Metta-AI/bitworld/blob/master/docs/bitreplay_spec.md"
@@ -408,7 +408,7 @@
           "title": "Submit a Policy",
           "content": {
             "type": "uri",
-            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/players/how_to_submit_coworld_policy.md"
+            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md"
           }
         },
         {
@@ -416,7 +416,7 @@
           "title": "Improve a Policy",
           "content": {
             "type": "uri",
-            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/players/smart_bot_guide.md"
+            "value": "https://github.com/Metta-AI/coworld-crewrift/blob/master/README.md"
           }
         }
       ]
