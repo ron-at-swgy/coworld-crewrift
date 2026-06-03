@@ -19,7 +19,7 @@ type
 const
   BotCount = 8
   DefaultSpeed = 1
-  DefaultStartPort = 18080
+  DefaultStartPort = 18080bs
   MaxManualSeed = 1_000_000_000
   PollMs = 100
   ReadyTimeoutMs = 10_000

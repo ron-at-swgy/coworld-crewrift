@@ -9,11 +9,13 @@ const
   ReplayScrubberWidth = 84
   ReplayScrubberHeight = 5
   ReplayScrubberTrackY = 2
-  ReplayScrubberY = 15
-  ReplayPanelHeight = 22
-  ReplayControlLayerId = 8
-  ReplayControlLayerType = 8
-  ReplayMismatchLayerId = 9
+  ReplayScrubberY = 8
+  ReplayPanelHeight = 20
+  ReplayCenterBottomLayerId = 8
+  ReplayBottomLeftLayerId = 9
+  ReplayCenterBottomLayerType = 8
+  ReplayBottomLeftLayerType = 4
+  ReplayMismatchLayerId = 10
   ReplayMismatchLayerType = 5
   ReplayTickSpriteId = 4002
   ReplayControlsSpriteId = 4003
@@ -2553,7 +2555,7 @@ proc buildSpriteProtocolPlayerUpdates*(
 
 proc replayCommandAt(layer, x, y: int): char =
   ## Returns the replay transport command under a UI coordinate.
-  if layer != ReplayControlLayerId:
+  if layer != ReplayBottomLeftLayerId:
     return '\0'
   let
     localX = x - TransportX
@@ -2592,7 +2594,7 @@ proc replayScrubTickAt(
   requireInside = true
 ): int =
   ## Returns the replay tick under the scrubber pointer.
-  if layer != ReplayControlLayerId or maxTick < 0:
+  if layer != ReplayCenterBottomLayerId or maxTick < 0:
     return -1
   let
     scrubberX = max(0, (ScreenWidth - ReplayScrubberWidth) div 2)
@@ -2823,17 +2825,17 @@ proc buildSpriteProtocolUpdates*(
     )
     if scoreJoinOrder >= 0:
       nextState.toggleSelectedJoinOrder(scoreJoinOrder)
-    else:
+    elif replayEnabled and replayTick >= 0:
       let seekTick = replayScrubTickAt(
         nextState.mouseLayer,
         nextState.mouseX,
         nextState.mouseY,
         replayMaxTick
       )
-      if replayEnabled and replayTick >= 0 and seekTick >= 0:
+      if seekTick >= 0:
         nextState.scrubbingReplay = true
         nextState.replaySeekTick = seekTick
-      elif replayTick >= 0:
+      else:
         let command = replayCommandAt(
           nextState.mouseLayer,
           nextState.mouseX,
@@ -2845,10 +2847,10 @@ proc buildSpriteProtocolUpdates*(
           nextState.toggleSelectedJoinOrder(
             sim.selectSpritePlayer(nextState.mouseX, nextState.mouseY)
           )
-      elif not nextState.povActive and nextState.mouseLayer == MapLayerId:
-        nextState.toggleSelectedJoinOrder(
-          sim.selectSpritePlayer(nextState.mouseX, nextState.mouseY)
-        )
+    elif not nextState.povActive and nextState.mouseLayer == MapLayerId:
+      nextState.toggleSelectedJoinOrder(
+        sim.selectSpritePlayer(nextState.mouseX, nextState.mouseY)
+      )
     nextState.clickPending = false
   if replayEnabled and replayTick >= 0 and nextState.mouseDown and
       nextState.scrubbingReplay:
@@ -2906,11 +2908,25 @@ proc buildSpriteProtocolUpdates*(
   if not nextState.initialized:
     result = sim.buildSpriteProtocolInit(nextState.spriteDefs)
     result.addLayer(
-      ReplayControlLayerId,
-      ReplayControlLayerType,
+      ReplayCenterBottomLayerId,
+      ReplayCenterBottomLayerType,
       UiLayerFlag
     )
-    result.addViewport(ReplayControlLayerId, ScreenWidth, ReplayPanelHeight)
+    result.addViewport(
+      ReplayCenterBottomLayerId,
+      ScreenWidth,
+      ReplayPanelHeight
+    )
+    result.addLayer(
+      ReplayBottomLeftLayerId,
+      ReplayBottomLeftLayerType,
+      UiLayerFlag
+    )
+    result.addViewport(
+      ReplayBottomLeftLayerId,
+      ScreenWidth,
+      ReplayPanelHeight
+    )
     nextState.initialized = true
 
   nextState.updateTrails(sim)
@@ -3062,77 +3078,78 @@ proc buildSpriteProtocolUpdates*(
       -1
     )
 
-  let
-    controlTick = max(0, replayTick)
-    controlMaxTick = max(controlTick, replayMaxTick)
-    tickText = sim.buildSpriteProtocolTextSprite(
-      ["TICK " & $controlTick],
-      if replayEnabled: 2'u8 else: 1'u8
+  if replayEnabled:
+    let
+      controlTick = max(0, replayTick)
+      controlMaxTick = max(controlTick, replayMaxTick)
+      tickText = sim.buildSpriteProtocolTextSprite(
+        ["TICK " & $controlTick],
+        2'u8
+      )
+      scrubber = buildReplayScrubberSprite(
+        controlTick,
+        controlMaxTick,
+        true
+      )
+      controls = sim.buildReplayControlsSprite(
+        replayPlaying,
+        replaySpeed,
+        replayLooping,
+        replayEnabled
+      )
+    currentIds.add(ReplayTickObjectId)
+    currentIds.add(ReplayControlsObjectId)
+    currentIds.add(ReplayScrubberObjectId)
+    result.addSpriteChanged(
+      nextState.spriteDefs,
+      ReplayTickSpriteId,
+      tickText.width,
+      tickText.height,
+      tickText.pixels,
+      "replay tick " & $controlTick
     )
-    scrubber = buildReplayScrubberSprite(
-      controlTick,
-      controlMaxTick,
-      replayEnabled or controlMaxTick > 0
+    result.addObject(
+      ReplayTickObjectId,
+      max(0, (ScreenWidth - tickText.width) div 2),
+      0,
+      0,
+      ReplayCenterBottomLayerId,
+      ReplayTickSpriteId
     )
-    controls = sim.buildReplayControlsSprite(
-      replayPlaying,
-      replaySpeed,
-      replayLooping,
-      replayEnabled
+    result.addSpriteChanged(
+      nextState.spriteDefs,
+      ReplayScrubberSpriteId,
+      scrubber.width,
+      scrubber.height,
+      scrubber.pixels,
+      "replay scrubber",
+      changed = true
     )
-  currentIds.add(ReplayTickObjectId)
-  currentIds.add(ReplayControlsObjectId)
-  currentIds.add(ReplayScrubberObjectId)
-  result.addSpriteChanged(
-    nextState.spriteDefs,
-    ReplayTickSpriteId,
-    tickText.width,
-    tickText.height,
-    tickText.pixels,
-    "replay tick " & $controlTick
-  )
-  result.addObject(
-    ReplayTickObjectId,
-    max(0, (ScreenWidth - tickText.width) div 2),
-    0,
-    0,
-    ReplayControlLayerId,
-    ReplayTickSpriteId
-  )
-  result.addSpriteChanged(
-    nextState.spriteDefs,
-    ReplayScrubberSpriteId,
-    scrubber.width,
-    scrubber.height,
-    scrubber.pixels,
-    "replay scrubber",
-    changed = replayEnabled or controlMaxTick > 0
-  )
-  result.addObject(
-    ReplayScrubberObjectId,
-    max(0, (ScreenWidth - ReplayScrubberWidth) div 2),
-    ReplayScrubberY,
-    0,
-    ReplayControlLayerId,
-    ReplayScrubberSpriteId
-  )
-  result.addSpriteChanged(
-    nextState.spriteDefs,
-    ReplayControlsSpriteId,
-    controls.width,
-    controls.height,
-    controls.pixels,
-    "replay controls",
-    changed = true
-  )
-  result.addObject(
-    ReplayControlsObjectId,
-    TransportX,
-    TransportY,
-    0,
-    ReplayControlLayerId,
-    ReplayControlsSpriteId
-  )
+    result.addObject(
+      ReplayScrubberObjectId,
+      max(0, (ScreenWidth - ReplayScrubberWidth) div 2),
+      ReplayScrubberY,
+      0,
+      ReplayCenterBottomLayerId,
+      ReplayScrubberSpriteId
+    )
+    result.addSpriteChanged(
+      nextState.spriteDefs,
+      ReplayControlsSpriteId,
+      controls.width,
+      controls.height,
+      controls.pixels,
+      "replay controls",
+      changed = true
+    )
+    result.addObject(
+      ReplayControlsObjectId,
+      TransportX,
+      TransportY,
+      0,
+      ReplayBottomLeftLayerId,
+      ReplayControlsSpriteId
+    )
   sim.addReplayMismatchWarning(
     nextState.spriteDefs,
     currentIds,

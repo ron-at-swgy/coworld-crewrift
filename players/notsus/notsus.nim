@@ -15,7 +15,7 @@ when not defined(italkalotLibrary):
     import windy, ../../src/crewrift/common/scales
     import silky except measure
 import std/[algorithm, exitprocs, heapqueue, monotimes, options, os,
-  random, strutils, times]
+  parseopt, random, strutils, times]
 
 const
   PlayerScreenX = ScreenWidth div 2
@@ -5855,32 +5855,123 @@ when not defined(italkalotLibrary):
           sleep(250)
 
 when isMainModule and not defined(italkalotLibrary):
-  let
-    url = getEnv("COWORLD_PLAYER_WS_URL")
-    address = DefaultHost
-    port = PlayerDefaultPort
-    gui = false
-    name = ""
-    mapPath = ""
-    token = ""
-    slot = -1
-    exitOnDisconnect = url.len > 0
-    protocolMode = WireSprite
+  type
+    BotRunConfig = object
+      url: string
+      address: string
+      port: int
+      gui: bool
+      name: string
+      mapPath: string
+      token: string
+      slot: int
+      exitOnDisconnect: bool
+      protocolMode: WireProtocolMode
+
+  proc requireOptionValue(key, val: string) =
+    ## Raises when one command-line option is missing its value.
+    if val.len == 0:
+      raise newException(ValueError, "Option --" & key & " requires a value.")
+
+  proc parseBotPort(value: string): int =
+    ## Parses a bot server port.
+    try:
+      result = value.parseInt()
+    except ValueError:
+      raise newException(ValueError, "--port must be an integer.")
+    if result <= 0 or result > 65535:
+      raise newException(ValueError, "--port must be between 1 and 65535.")
+
+  proc parseBotSlot(value: string): int =
+    ## Parses a requested bot slot index.
+    try:
+      result = value.parseInt()
+    except ValueError:
+      raise newException(ValueError, "--slot must be an integer.")
+    if result < 0:
+      raise newException(ValueError, "--slot must be non-negative.")
+
+  proc readBotRunConfig(): BotRunConfig =
+    ## Reads command-line options for one bot process.
+    result = BotRunConfig(
+      url: getEnv("COWORLD_PLAYER_WS_URL"),
+      address: DefaultHost,
+      port: PlayerDefaultPort,
+      slot: -1,
+      protocolMode: WireSprite
+    )
+    var
+      addressSet = false
+      portSet = false
+      urlSet = false
+    for kind, key, val in getopt():
+      case kind
+      of cmdLongOption:
+        case key
+        of "address", "host":
+          key.requireOptionValue(val)
+          result.address = val
+          addressSet = true
+        of "port":
+          key.requireOptionValue(val)
+          result.port = parseBotPort(val)
+          portSet = true
+        of "url":
+          key.requireOptionValue(val)
+          result.url = val
+          urlSet = true
+        of "name":
+          key.requireOptionValue(val)
+          result.name = val
+        of "map", "map-path":
+          key.requireOptionValue(val)
+          result.mapPath = val
+        of "token":
+          key.requireOptionValue(val)
+          result.token = val
+        of "slot":
+          key.requireOptionValue(val)
+          result.slot = parseBotSlot(val)
+        of "gui":
+          if val.len > 0:
+            raise newException(
+              ValueError,
+              "Option --gui does not take a value."
+            )
+          result.gui = true
+        of "protocol":
+          key.requireOptionValue(val)
+          result.protocolMode = parseProtocolMode(val)
+        else:
+          raise newException(ValueError, "Unknown option: --" & key)
+      of cmdShortOption:
+        raise newException(ValueError, "Unknown option: -" & key)
+      of cmdArgument:
+        raise newException(ValueError, "Unexpected argument: " & key)
+      of cmdEnd:
+        discard
+    if not urlSet and (addressSet or portSet):
+      result.url = ""
+    result.exitOnDisconnect = result.url.len > 0
+
+  let config = readBotRunConfig()
   let target =
-    if url.len > 0: url
-    else: "ws://" & address & ":" & $port
+    if config.url.len > 0:
+      config.url
+    else:
+      "ws://" & config.address & ":" & $config.port
   echo "starting truecrew -> ", target,
-    " protocol=", protocolMode.protocolName()
+    " protocol=", config.protocolMode.protocolName()
   addExitProc(finishProfileTrace)
   runBot(
-    address,
-    port,
-    gui,
-    name,
-    mapPath,
-    url,
-    token,
-    slot,
-    exitOnDisconnect,
-    protocolMode
+    config.address,
+    config.port,
+    config.gui,
+    config.name,
+    config.mapPath,
+    config.url,
+    config.token,
+    config.slot,
+    config.exitOnDisconnect,
+    config.protocolMode
   )
