@@ -12,7 +12,6 @@ const
   DefaultMapPath* = "data/croatoan.resources"
   DarkBgPath* = "data/darkbg.aseprite"
   SpriteSheetAsepritePath = "data/spritesheet.aseprite"
-  SpriteSheetPngPath = "data/spritesheet.png"
   TinyFontPath = "data/tiny5.aseprite"
   MapWidth* = 1235
   MapHeight* = 659
@@ -461,24 +460,12 @@ proc resolveMapPath*(path: string): string =
     gameDir() / trimmed
 
 proc spriteSheetPath(): string =
-  ## Returns the best available sprite sheet path.
-  let
-    asepritePath = gameDir() / SpriteSheetAsepritePath
-    pngPath = gameDir() / SpriteSheetPngPath
-  if fileExists(asepritePath):
-    asepritePath
-  elif fileExists(pngPath):
-    pngPath
-  else:
-    pngPath
+  ## Returns the sprite sheet aseprite path.
+  gameDir() / SpriteSheetAsepritePath
 
 proc loadSpriteSheet*(): Image =
-  ## Loads the sprite sheet from aseprite when available.
-  let path = spriteSheetPath()
-  if path.endsWith(".aseprite"):
-    readAsepriteImage(path)
-  else:
-    readImage(path)
+  ## Loads the sprite sheet from aseprite.
+  readAsepriteImage(spriteSheetPath())
 
 proc crewSheetPath(): string =
   ## Returns the crew sprite sheet path.
