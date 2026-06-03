@@ -8,6 +8,7 @@ type
     data*: ReplayData
     joinIndex*: int
     leaveIndex*: int
+    chatIndex*: int
     inputIndex*: int
     hashIndex*: int
     masks*: seq[uint8]
@@ -20,7 +21,7 @@ type
     hashMismatchTick*: int
 
 const
-  PlaybackSpeeds* = [1, 2, 3, 4, 8]
+  PlaybackSpeeds* = [1, 2, 3, 4, 8, 16]
   CrewriftReplayMagic = "CREWRIFT"
   CrewriftReplayFormatVersion = 3'u16
   CrewriftReplaySpec = ReplaySpec(
@@ -29,7 +30,7 @@ const
     gameName: GameName,
     gameVersion: GameVersion,
     joinKind: rjkNameSlotToken,
-    allowChat: false,
+    allowChat: true,
     allowCompressed: true,
     hashOrder: rhoStop
   )
@@ -76,6 +77,7 @@ proc resetReplay*(replay: var ReplayPlayer) =
   ## Resets replay playback cursors.
   replay.joinIndex = 0
   replay.leaveIndex = 0
+  replay.chatIndex = 0
   replay.inputIndex = 0
   replay.hashIndex = 0
   replay.hashValidationFailed = false
@@ -119,6 +121,12 @@ proc applyReplayEvents(replay: var ReplayPlayer, sim: var SimServer) =
     replay.ensureReplayPlayer(int(input.player))
     replay.masks[int(input.player)] = input.keys
     inc replay.inputIndex
+
+  while replay.chatIndex < replay.data.chats.len and
+      replay.data.chats[replay.chatIndex].time <= time:
+    let chat = replay.data.chats[replay.chatIndex]
+    sim.addVotingChat(int(chat.player), chat.message)
+    inc replay.chatIndex
 
 proc replayPrevInputs(
   replay: var ReplayPlayer,
@@ -225,6 +233,8 @@ proc applyReplayCommand*(
     replay.speedIndex = 3
   of '8':
     replay.speedIndex = 4
+  of '6':
+    replay.speedIndex = 5
   of ',', '<':
     replay.playing = false
     replay.seekReplay(sim, 0)
@@ -259,6 +269,8 @@ proc applySpeedCommand*(speedIndex: var int, command: char) =
     speedIndex = 3
   of '8':
     speedIndex = 4
+  of '6':
+    speedIndex = 5
   else:
     discard
 

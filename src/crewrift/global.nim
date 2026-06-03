@@ -2583,6 +2583,8 @@ proc replayCommandAt(layer, x, y: int): char =
       return '4'
     if speedX >= 64 and speedX < 76:
       return '8'
+    if speedX >= 80 and speedX < 100:
+      return '6'
   '\0'
 
 proc replayScrubTickAt(
@@ -2705,7 +2707,7 @@ proc buildReplayControlsSprite(
       tint
     )
 
-  let speedTexts = ["1X", "2X", "3X", "4X", "8X"]
+  let speedTexts = ["1X", "2X", "3X", "4X", "8X", "16X"]
   var x = TransportSpeedX
   for i in 0 ..< speedTexts.len:
     let speed =
@@ -2714,7 +2716,8 @@ proc buildReplayControlsSprite(
       of 1: 2
       of 2: 3
       of 3: 4
-      else: 8
+      of 4: 8
+      else: 16
     let color = if speed == replaySpeed: 10'u8 else: 1'u8
     sim.blitSmallText(
       result.pixels,

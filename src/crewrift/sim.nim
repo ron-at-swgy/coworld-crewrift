@@ -280,6 +280,7 @@ type
     maxSpeed*: int
     stopThreshold*: int
     seed*: int
+    speed*: int
     killRange*: int
     killCooldownTicks*: int
     roleRevealTicks*: int
@@ -1019,6 +1020,7 @@ proc defaultGameConfig*(): GameConfig =
     maxSpeed: MaxSpeed,
     stopThreshold: StopThreshold,
     seed: 0xA6019,
+    speed: 1,
     killRange: KillRange,
     killCooldownTicks: KillCooldownTicks,
     roleRevealTicks: RoleRevealTicks,
@@ -1267,6 +1269,11 @@ proc validate(config: GameConfig) =
     raise newException(CrewriftError, "can't do more than 16 players.")
   if config.imposterCount < 0:
     raise newException(CrewriftError, "Config field imposterCount must be non-negative.")
+  if config.speed notin [1, 2, 3, 4, 8, 16]:
+    raise newException(
+      CrewriftError,
+      "Config field speed must be 1, 2, 3, 4, 8, or 16."
+    )
   if config.startWaitTicks < 0:
     raise newException(CrewriftError, "Config field startWaitTicks must be non-negative.")
   if config.tasksPerPlayer < 0:
@@ -1331,6 +1338,7 @@ proc update*(config: var GameConfig, jsonText: string) =
   node.readConfigInt("maxSpeed", config.maxSpeed)
   node.readConfigInt("stopThreshold", config.stopThreshold)
   node.readConfigInt("seed", config.seed)
+  node.readConfigInt("speed", config.speed)
   node.readConfigInt("killRange", config.killRange)
   node.readConfigInt("killCooldownTicks", config.killCooldownTicks)
   node.readConfigInt("roleRevealTicks", config.roleRevealTicks)
@@ -1412,6 +1420,7 @@ proc configJson*(config: GameConfig): string =
     "maxSpeed": config.maxSpeed,
     "stopThreshold": config.stopThreshold,
     "seed": config.seed,
+    "speed": config.speed,
     "killRange": config.killRange,
     "killCooldownTicks": config.killCooldownTicks,
     "roleRevealTicks": config.roleRevealTicks,

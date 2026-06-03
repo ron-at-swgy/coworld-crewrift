@@ -1,6 +1,7 @@
 import
   std/[json, os, unittest],
   zippy,
+  bitworld/spriteprotocol,
   crewrift/replays,
   crewrift/server,
   crewrift/sim
@@ -240,6 +241,7 @@ suite "player slots":
     var writer = openReplayWriter(path, "{}")
     writer.writeJoin(12'u32, 0, "player1", -1, "")
     writer.writeJoin(24'u32, 1, "player2", 3, "0xBADA55")
+    writer.writeChat(36'u32, 1, "body in engine")
     writer.closeReplayWriter()
 
     let replayBytes = readFile(path)
@@ -251,6 +253,10 @@ suite "player slots":
     check data.joins[1].name == "player2"
     check data.joins[1].slot == 3
     check data.joins[1].token == "0xBADA55"
+    check data.chats.len == 1
+    check data.chats[0].time == 36'u32
+    check data.chats[0].player == 1'u8
+    check data.chats[0].message == "body in engine"
 
     let compressedData = parseReplayBytes(
       compress(replayBytes, dataFormat = dfZlib)
@@ -259,6 +265,7 @@ suite "player slots":
     check compressedData.joins[1].name == "player2"
     check compressedData.joins[1].slot == 3
     check compressedData.joins[1].token == "0xBADA55"
+    check compressedData.chats[0].message == "body in engine"
 
     removeFile(path)
 
@@ -292,6 +299,35 @@ suite "player slots":
     check data.joins[1].token == "imp-token"
 
     removeFile(path)
+
+  test "replay chat is applied before hash validation":
+    var liveSim = initCrewriftForTest(defaultGameConfig())
+    discard liveSim.addPlayer("player1")
+    liveSim.startVote()
+    liveSim.addVotingChat(0, "hello")
+    liveSim.step(@[InputState()], @[InputState()])
+    let expectedHash = liveSim.gameHash()
+
+    var replaySim = initCrewriftForTest(defaultGameConfig())
+    discard replaySim.addPlayer("player1")
+    replaySim.startVote()
+    var replay = initReplayPlayer(ReplayData(
+      gameName: GameName,
+      gameVersion: GameVersion,
+      configJson: "{}",
+      chats: @[
+        ReplayChat(time: tickTime(0), player: 0'u8, message: "hello")
+      ],
+      hashes: @[ReplayHash(tick: 1'u32, hash: expectedHash)]
+    ))
+
+    replay.stepReplay(replaySim)
+
+    check replaySim.tickCount == 1
+    check replaySim.chatMessages.len == 1
+    check replaySim.players[0].lastChatTick == 0
+    check not replay.hashValidationFailed
+    check replay.hashIndex == 1
 
   test "replay hash mismatch marks mismatch and stops at recorded end":
     var replay = initReplayPlayer(ReplayData(

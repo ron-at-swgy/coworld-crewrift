@@ -61,6 +61,13 @@ proc liveProgressMaxTick(config: GameConfig): int =
   else:
     MaxTicks
 
+proc liveSpeedIndex(config: GameConfig): int =
+  ## Returns the live playback speed index for a config.
+  for i, speed in PlaybackSpeeds:
+    if speed == config.speed:
+      return i
+  0
+
 proc isWebSocketUpgrade(request: Request): bool =
   ## Returns true when the GET request is a websocket upgrade.
   request.headers["Sec-WebSocket-Key"].len > 0
@@ -731,7 +738,7 @@ proc runServerLoop*(
     sim = initSimServer(config)
     lastTick = getMonoTime()
     prevInputs: seq[InputState]
-    liveSpeedIndex = 0
+    liveSpeedIndex = config.liveSpeedIndex()
     gamesPlayed = 0
 
   while true:
@@ -915,6 +922,12 @@ proc runServerLoop*(
               websocket,
               -1
             )
+            if playerIndex >= 0:
+              replayWriter.writeChat(
+                tickTime(sim.tickCount),
+                playerIndex,
+                message
+              )
             sim.addVotingChat(playerIndex, message)
           appState.chatMessages.clear()
         for websocket, state in appState.globalViewers.pairs:

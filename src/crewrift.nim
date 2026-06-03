@@ -19,6 +19,7 @@ proc echoStartupConfig(
   echo "Crewrift config: host=", runtimeConfig.host,
     " port=", runtimeConfig.port,
     " seed=", config.seed,
+    " speed=", config.speed, "x",
     " minPlayers=", config.minPlayers,
     " slots=", config.slots.len,
     " maxTicks=", config.maxTicks.limitText(),
