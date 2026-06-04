@@ -134,3 +134,44 @@ It might be beneficial for all crewmates to move as one large group and then all
 Right in the very beginning, one of the crewmates can call the emergency button, and that sets some weird rules for the game to follow. We're all going to do strategy X or strategy Y. "We're all going to watch everyone do one task, and then once someone is unable to do a task, we know that this is an imposter and we can vote them out."
 
 There are a bunch of strategies in the game that can work. The hard part is making sure that when you are together playing with eight AI bots that have nothing to do with each other (possibly written by different people in different languages), they all can somehow figure out and follow one of the meta strategies.
+
+## Source Tour
+
+Use the source as the real guide for writing a bot. Every useful bot has to
+solve the same chain of problems: connect to the player websocket, understand
+the sprite protocol, recover the map and walkability, work out who it is,
+choose goals, move to them, act, talk, vote, and exit cleanly. In this bot, the
+low-level protocol code is in `notsus/protocols.nim`, while most strategy code
+is in `notsus.nim`.
+
+- To connect to the game and run the frame loop, start at `runBot`.
+- To parse Sprite v1 and send input or chat, read `receiveLatestFrameInto`,
+  `applySpritePacket`, `inputBlob`, and `chatBlob` in `notsus/protocols.nim`.
+- To extract task, room, vent, camera, player, body, vote, and chat objects
+  from sprite labels, read `updateProtocolDetections`.
+- To build the static game map from protocol markers, read
+  `updateProtocolMap` and `applyProtocolMap`.
+- To load the walkability map before pathing, read the walkability branch in
+  `updateProtocolDetections`.
+- To work out whether the bot is a crewmate, imposter, or ghost, read
+  `rememberRoleReveal`, `updateRole`, `updateSelfColor`, and the "IMPS" branch
+  in `updateProtocolDetections`.
+- To keep track of where the bot is on the map, read `updateLocation`.
+- To choose the next action each frame, read `decideNextMask`.
+- To pick tasks and complete them, read `nearestTaskGoal` and
+  `holdTaskAction`.
+- To navigate through the ship, read `findPath`, `navigateToPoint`,
+  `axisMask`, and `preciseAxisMask`.
+- To detect and report bodies, read `scanBodies`, `queueBodySeen`,
+  `queueBodyReport`, and `reportBodyAction`.
+- To pretend to be a crewmate as an imposter, then hunt later, read
+  `decideImposterMask`.
+- To press the emergency button for cooldown resets, read
+  `buttonResetShouldAct` and `pressButtonResetAction`.
+- To parse voting, choose a vote, and send meeting chat, read
+  `parseVotingScreen`, `desiredVotingDecision`, `decideVotingMask`, and
+  `pendingChatReady`.
+
+The fastest way to improve the bot is to watch a replay, name the failed
+capability, jump to the function above, make one small change, and run the bot
+again.
