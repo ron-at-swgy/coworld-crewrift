@@ -740,6 +740,8 @@ proc runServerLoop*(
     prevInputs: seq[InputState]
     liveSpeedIndex = config.liveSpeedIndex()
     gamesPlayed = 0
+  if replayLoaded:
+    replayPlayer.buildReplayKeyframes(sim)
 
   while true:
     var
@@ -769,6 +771,7 @@ proc runServerLoop*(
       sim = initSimServer(config)
       replayPlayer = initReplayPlayer(replayData)
       replayPlayer.mismatchQuit = runtimeConfig.mismatchQuit
+      replayPlayer.buildReplayKeyframes(sim)
       replayLoaded = true
       {.gcsafe.}:
         withLock appState.lock:

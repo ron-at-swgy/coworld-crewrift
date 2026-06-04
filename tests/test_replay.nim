@@ -20,6 +20,50 @@ proc initReplaySim(data: ReplayData): SimServer =
     setCurrentDir(previousDir)
 
 suite "notsus replay":
+  test "sim serializes with flatty":
+    let data = loadReplay(NotsusReplayPath)
+    var
+      sim = data.initReplaySim()
+      replay = initReplayPlayer(data)
+    replay.looping = false
+    replay.mismatchQuit = true
+
+    while sim.tickCount < 250:
+      replay.stepReplay(sim)
+
+    let
+      hash = sim.gameHash()
+      bytes = serializeReplaySim(sim)
+      restored = deserializeReplaySim(bytes)
+
+    check bytes.len > 0
+    check restored.tickCount == sim.tickCount
+    check restored.gameHash() == hash
+
+  test "keyframed seek restores matching state":
+    let data = loadReplay(NotsusReplayPath)
+    var
+      baseline = data.initReplaySim()
+      baselineReplay = initReplayPlayer(data)
+      sim = data.initReplaySim()
+      replay = initReplayPlayer(data)
+    baselineReplay.looping = false
+    baselineReplay.mismatchQuit = true
+    replay.looping = false
+    replay.mismatchQuit = true
+
+    let target = 1234
+    while baseline.tickCount < target:
+      baselineReplay.stepReplay(baseline)
+    let hash = baseline.gameHash()
+
+    replay.buildReplayKeyframes(sim)
+    replay.seekReplay(sim, target)
+
+    check replay.keyframes.len > 1
+    check sim.tickCount == target
+    check sim.gameHash() == hash
+
   test "hashes match":
     let data = loadReplay(NotsusReplayPath)
     var

@@ -1,9 +1,23 @@
 import
+  flatty,
   bitworld/spriteprotocol,
   bitworld/replays as replayCodec,
   sim
 
 type
+  ReplayKeyframe* = object
+    tick*: int
+    simBytes*: string
+    joinIndex*: int
+    leaveIndex*: int
+    chatIndex*: int
+    inputIndex*: int
+    hashIndex*: int
+    masks*: seq[uint8]
+    lastAppliedMasks*: seq[uint8]
+    hashValidationFailed*: bool
+    hashMismatchTick*: int
+
   ReplayPlayer* = object
     data*: ReplayData
     joinIndex*: int
@@ -19,9 +33,11 @@ type
     mismatchQuit*: bool
     hashValidationFailed*: bool
     hashMismatchTick*: int
+    keyframes*: seq[ReplayKeyframe]
 
 const
   PlaybackSpeeds* = [1, 2, 3, 4, 8, 16]
+  ReplayKeyframeTicks* = 100
   CrewriftReplayMagic = "CREWRIFT"
   CrewriftReplayFormatVersion = 3'u16
   CrewriftReplaySpec = ReplaySpec(
@@ -52,6 +68,14 @@ proc parseReplayBytes*(bytes: string): ReplayData =
 proc loadReplay*(path: string): ReplayData =
   ## Loads a replay file into memory.
   replayCodec.loadReplay(path, CrewriftReplaySpec)
+
+proc serializeReplaySim*(sim: SimServer): string =
+  ## Serializes one simulation state for replay keyframes.
+  sim.toFlatty()
+
+proc deserializeReplaySim*(bytes: string): SimServer =
+  ## Deserializes one simulation state from a replay keyframe.
+  bytes.fromFlatty(SimServer)
 
 proc initReplayPlayer*(data: ReplayData): ReplayPlayer =
   ## Builds replay playback state.
@@ -84,6 +108,51 @@ proc resetReplay*(replay: var ReplayPlayer) =
   replay.hashMismatchTick = -1
   replay.masks = @[]
   replay.lastAppliedMasks = @[]
+
+proc saveReplayKeyframe(
+  replay: ReplayPlayer,
+  sim: SimServer
+): ReplayKeyframe =
+  ## Builds one replay keyframe from the current playback state.
+  ReplayKeyframe(
+    tick: sim.tickCount,
+    simBytes: serializeReplaySim(sim),
+    joinIndex: replay.joinIndex,
+    leaveIndex: replay.leaveIndex,
+    chatIndex: replay.chatIndex,
+    inputIndex: replay.inputIndex,
+    hashIndex: replay.hashIndex,
+    masks: replay.masks,
+    lastAppliedMasks: replay.lastAppliedMasks,
+    hashValidationFailed: replay.hashValidationFailed,
+    hashMismatchTick: replay.hashMismatchTick
+  )
+
+proc restoreReplayKeyframe(
+  replay: var ReplayPlayer,
+  sim: var SimServer,
+  keyframe: ReplayKeyframe
+) =
+  ## Restores playback state from one replay keyframe.
+  let gameEventLoggingEnabled = sim.gameEventLoggingEnabled
+  sim = deserializeReplaySim(keyframe.simBytes)
+  sim.gameEventLoggingEnabled = gameEventLoggingEnabled
+  replay.joinIndex = keyframe.joinIndex
+  replay.leaveIndex = keyframe.leaveIndex
+  replay.chatIndex = keyframe.chatIndex
+  replay.inputIndex = keyframe.inputIndex
+  replay.hashIndex = keyframe.hashIndex
+  replay.masks = keyframe.masks
+  replay.lastAppliedMasks = keyframe.lastAppliedMasks
+  replay.hashValidationFailed = keyframe.hashValidationFailed
+  replay.hashMismatchTick = keyframe.hashMismatchTick
+
+proc replayKeyframeIndex(replay: ReplayPlayer, tick: int): int =
+  ## Returns the newest keyframe at or before one tick.
+  for i, keyframe in replay.keyframes:
+    if keyframe.tick > tick:
+      break
+    result = i
 
 proc ensureReplayPlayer(replay: var ReplayPlayer, player: int) =
   ## Expands replay input tables for one player.
@@ -190,12 +259,38 @@ proc stepReplay*(replay: var ReplayPlayer, sim: var SimServer) =
   sim.step(inputs, prevInputs)
   replay.checkReplayHash(sim)
 
+proc buildReplayKeyframes*(
+  replay: var ReplayPlayer,
+  initialSim: SimServer,
+  interval = ReplayKeyframeTicks
+) =
+  ## Builds serialized replay seek keyframes.
+  replay.keyframes = @[]
+  var
+    sim = initialSim
+    builder = initReplayPlayer(replay.data)
+  sim.gameEventLoggingEnabled = false
+  builder.looping = false
+  builder.mismatchQuit = replay.mismatchQuit
+  replay.keyframes.add(builder.saveReplayKeyframe(sim))
+  let maxTick = builder.replayMaxTick()
+  while builder.playing and sim.tickCount < maxTick:
+    builder.stepReplay(sim)
+    if sim.tickCount mod max(interval, 1) == 0 or sim.tickCount == maxTick:
+      replay.keyframes.add(builder.saveReplayKeyframe(sim))
+
 proc seekReplay*(replay: var ReplayPlayer, sim: var SimServer, tick: int) =
   ## Seeks replay playback to a target tick.
-  let gameEventLoggingEnabled = sim.gameEventLoggingEnabled
-  sim = initSimServer(sim.config)
-  sim.gameEventLoggingEnabled = gameEventLoggingEnabled
-  replay.resetReplay()
+  if replay.keyframes.len > 0:
+    replay.restoreReplayKeyframe(
+      sim,
+      replay.keyframes[replay.replayKeyframeIndex(tick)]
+    )
+  else:
+    let gameEventLoggingEnabled = sim.gameEventLoggingEnabled
+    sim = initSimServer(sim.config)
+    sim.gameEventLoggingEnabled = gameEventLoggingEnabled
+    replay.resetReplay()
   while sim.tickCount < tick and replay.hashIndex < replay.data.hashes.len:
     replay.stepReplay(sim)
 
