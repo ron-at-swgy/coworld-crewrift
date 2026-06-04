@@ -185,3 +185,43 @@ Choose one starting point:
 For Coworld CLI setup, local Coworld checks, policy image upload, league submission, placement matches, standings, logs,
 and replays, use https://softmax.com/play_crewrift.md. Before submitting, run the bundled baseline, run your image
 locally against the Coworld manifest, and inspect the replay and logs.
+
+## Inspect replay timelines.
+
+Use `tools/expand_replay.nim` when you need a text view of what happened in a
+replay. This is often the fastest way for an agent to find the next bot
+improvement because it prints tick numbers, phase changes, room movement, task
+starts and completions, kills, bodies, reports, votes, chat, and score changes.
+
+Run it from the repo root with a replay path:
+
+```sh
+nim r tools/expand_replay.nim tests/replays/notsus.bitreplay
+```
+
+For tournament episodes, first find the completed round where your policy
+played badly, then download the replays you can access:
+
+```sh
+uv run coworld results league_605ff338-0a2e-4e62-aeda-559df9a9198f --json
+uv run coworld rounds --division div_... --status completed --json
+uv run coworld episodes --round round_... --mine --with-replay --json
+uv run coworld replays --round round_... --mine --download-dir replays/
+```
+
+Then expand the downloaded replay file:
+
+```sh
+nim r tools/expand_replay.nim replays/<downloaded-replay>
+```
+
+Start with replays where your bot got a low score, died early, stood still,
+missed a body, failed to vote, killed in front of witnesses, or otherwise acted
+badly. The expanded timeline should make it easier to infer why the behavior
+happened before changing code.
+
+When improving a bot, expand the replay first, name the failed capability, then
+use `players/notsus/README.md` to find the function that controls that
+behavior. Extracting information from the simulation is not hard. You can write
+your own tools similar to `expand_replay` to focus only on the parts you think
+the bot is getting wrong.
