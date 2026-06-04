@@ -98,6 +98,10 @@ proc roomNameAt(sim: SimServer, x, y: int): string =
       bestRoom = i
   sim.roomName(bestRoom)
 
+proc bodyText(sim: SimServer, body: Body): string =
+  ## Returns a readable body and room.
+  sim.bodyPlayer(body) & " room " & sim.roomNameAt(body.x, body.y)
+
 proc bodyKey(body: Body): string =
   ## Returns a stable key for one body instance.
   $body.slotId & ":" & $body.x & ":" & $body.y
@@ -116,8 +120,7 @@ proc syncPlayers(
   votes: var seq[int],
   rooms: var seq[int],
   rewards: var seq[int],
-  killCooldowns: var seq[int],
-  buttonCalls: var seq[int]
+  killCooldowns: var seq[int]
 ) =
   ## Adds tracking state for newly joined players.
   while alive.len < sim.players.len:
@@ -128,7 +131,6 @@ proc syncPlayers(
     rooms.add(sim.roomAt(i))
     rewards.add(sim.players[i].reward)
     killCooldowns.add(sim.players[i].killCooldown)
-    buttonCalls.add(sim.players[i].buttonCallsUsed)
     echo "  player ", sim.player(i), " joined"
     if rooms[i] >= 0:
       echo "  player ", sim.player(i), " entered room ",
@@ -157,58 +159,50 @@ proc printNewBodies(
       killer = sim.killerThisTick(killCooldowns)
     if killer >= 0 and victim >= 0:
       echo "  player ", sim.player(killer), " killed ", sim.player(victim)
-    echo "  body ", sim.bodyPlayer(body), " room ",
-      sim.roomNameAt(body.x, body.y)
+    echo "  body ", sim.bodyText(body)
     printed.add(key)
     if victim >= 0:
       result.add(victim)
 
-proc buttonUsedThisTick(
-  sim: SimServer,
-  buttonCalls: openArray[int]
-): bool =
-  ## Returns true when a button call was used this tick.
-  for i, player in sim.players:
-    if i < buttonCalls.len and player.buttonCallsUsed > buttonCalls[i]:
-      return true
-
-proc reporterForBody(sim: SimServer, body: Body): int =
-  ## Returns the living player close enough to report one body.
-  let
-    bx = body.x + CollisionW div 2
-    by = body.y + CollisionH div 2
-    rangeSq = sim.config.reportRange * sim.config.reportRange
-  for i, player in sim.players:
-    if not player.alive:
-      continue
-    let
-      px = player.x + CollisionW div 2
-      py = player.y + CollisionH div 2
-    if distSq(px, py, bx, by) <= rangeSq:
-      return i
-  -1
-
-proc printBodyReports(sim: SimServer) =
-  ## Prints bodies reported by nearby living players.
+proc reportedBodyText(sim: SimServer): string =
+  ## Returns the body that started the current vote.
   for body in sim.bodies:
-    let reporter = sim.reporterForBody(body)
-    if reporter >= 0:
-      echo "  player ", sim.player(reporter), " reported body ",
-        sim.bodyPlayer(body), " room ", sim.roomNameAt(body.x, body.y)
+    if body.slotId == sim.voteState.bodySlotId:
+      return sim.bodyText(body)
+  for body in sim.bodies:
+    if body.color == sim.voteState.bodyColor:
+      return sim.bodyText(body)
+  if sim.voteState.bodyColor != 255'u8:
+    return playerColorText(sim.voteState.bodyColor) & "(unknown)"
+  "unknown"
+
+proc voteCallerText(sim: SimServer): string =
+  ## Returns the player that started the current vote.
+  let reporter = sim.voteState.callerIndex
+  if reporter >= 0 and reporter < sim.players.len:
+    return sim.player(reporter)
+  "unknown"
+
+proc printVoteCall(sim: SimServer) =
+  ## Prints the event that started a vote.
+  case sim.voteState.callKind
+  of VoteCalledBody:
+    echo "  player ", sim.voteCallerText(), " reported body ",
+      sim.reportedBodyText()
+  of VoteCalledButton:
+    echo "  player ", sim.voteCallerText(), " called emergency button"
+  of VoteCalledUnknown:
+    discard
 
 proc updatePlayerCounters(
   sim: SimServer,
-  killCooldowns: var seq[int],
-  buttonCalls: var seq[int]
+  killCooldowns: var seq[int]
 ) =
   ## Copies player counters after a tick is printed.
   for i, player in sim.players:
     while killCooldowns.len <= i:
       killCooldowns.add(player.killCooldown)
-    while buttonCalls.len <= i:
-      buttonCalls.add(player.buttonCallsUsed)
     killCooldowns[i] = player.killCooldown
-    buttonCalls[i] = player.buttonCallsUsed
 
 proc printPlayerChanges(
   sim: SimServer,
@@ -355,7 +349,6 @@ proc expandReplay(path: string) =
     rooms: seq[int]
     rewards: seq[int]
     killCooldowns: seq[int]
-    buttonCalls: seq[int]
     printedBodies: seq[string]
     done: seq[seq[bool]]
     chatCount = 0
@@ -378,8 +371,8 @@ proc expandReplay(path: string) =
 
     if phase != sim.phase:
       echo "  phase ", $sim.phase
-      if sim.phase == Voting and not sim.buttonUsedThisTick(buttonCalls):
-        sim.printBodyReports()
+      if sim.phase == Voting:
+        sim.printVoteCall()
       phase = sim.phase
 
     sim.syncPlayers(
@@ -388,8 +381,7 @@ proc expandReplay(path: string) =
       votes,
       rooms,
       rewards,
-      killCooldowns,
-      buttonCalls
+      killCooldowns
     )
     let bodyVictims = sim.printNewBodies(printedBodies, killCooldowns)
     for victim in bodyVictims:
@@ -400,7 +392,7 @@ proc expandReplay(path: string) =
     sim.printVotes(votes)
     sim.printChats(chatCount)
     sim.printScoreChanges(rewards)
-    sim.updatePlayerCounters(killCooldowns, buttonCalls)
+    sim.updatePlayerCounters(killCooldowns)
 
   echo "done"
 

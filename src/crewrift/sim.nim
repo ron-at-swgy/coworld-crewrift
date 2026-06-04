@@ -191,6 +191,10 @@ type
     VoteCalledBody
 
   VoteState* = object
+    callKind*: VoteCallKind
+    callerIndex*: int
+    bodyColor*: uint8
+    bodySlotId*: int
     votes*: seq[int]
     cursor*: seq[int]
     resultTimer*: int
@@ -2600,9 +2604,14 @@ proc startVote*(
   sim: var SimServer,
   kind = VoteCalledUnknown,
   callerIndex = -1,
-  bodyColor = 255'u8
+  bodyColor = 255'u8,
+  bodySlotId = -1
 ) =
   ## Starts a voting meeting and logs its cause.
+  sim.voteState.callKind = kind
+  sim.voteState.callerIndex = callerIndex
+  sim.voteState.bodyColor = bodyColor
+  sim.voteState.bodySlotId = bodySlotId
   case kind
   of VoteCalledBody:
     sim.logGameEvent(
@@ -2677,7 +2686,7 @@ proc tryReport*(sim: var SimServer, reporterIndex: int, bodyLimit: int) =
       bx = body.x + CollisionW div 2
       by = body.y + CollisionH div 2
     if distSq(px, py, bx, by) <= rangeSq:
-      sim.startVote(VoteCalledBody, reporterIndex, body.color)
+      sim.startVote(VoteCalledBody, reporterIndex, body.color, body.slotId)
       return
 
 proc tryCallButton*(sim: var SimServer, callerIndex: int) =
@@ -3803,6 +3812,10 @@ proc initSimServer*(config: GameConfig): SimServer =
   result.gameStartTick = -1
   result.startWaitTimer = 0
   result.gameEventLoggingEnabled = true
+  result.voteState.callKind = VoteCalledUnknown
+  result.voteState.callerIndex = -1
+  result.voteState.bodyColor = 255'u8
+  result.voteState.bodySlotId = -1
   result.lastLobbyPlayersLogged = -1
   result.lastLobbyNeededLogged = -1
   result.lastLobbySecondsLogged = -1
@@ -3820,6 +3833,10 @@ proc resetToLobby*(sim: var SimServer) =
   sim.roleRevealTimer = 0
   sim.timeLimitReached = false
   sim.needsReregister = true
+  sim.voteState.callKind = VoteCalledUnknown
+  sim.voteState.callerIndex = -1
+  sim.voteState.bodyColor = 255'u8
+  sim.voteState.bodySlotId = -1
   sim.lastLobbyPlayersLogged = -1
   sim.lastLobbyNeededLogged = -1
   sim.lastLobbySecondsLogged = -1
