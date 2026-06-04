@@ -192,7 +192,9 @@ proc stepReplay*(replay: var ReplayPlayer, sim: var SimServer) =
 
 proc seekReplay*(replay: var ReplayPlayer, sim: var SimServer, tick: int) =
   ## Seeks replay playback to a target tick.
+  let gameEventLoggingEnabled = sim.gameEventLoggingEnabled
   sim = initSimServer(sim.config)
+  sim.gameEventLoggingEnabled = gameEventLoggingEnabled
   replay.resetReplay()
   while sim.tickCount < tick and replay.hashIndex < replay.data.hashes.len:
     replay.stepReplay(sim)

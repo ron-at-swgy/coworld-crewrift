@@ -377,6 +377,7 @@ type
     roleRevealTimer*: int
     timeLimitReached*: bool
     needsReregister*: bool
+    gameEventLoggingEnabled*: bool
     lastLobbyPlayersLogged*: int
     lastLobbyNeededLogged*: int
     lastLobbySecondsLogged*: int
@@ -1488,9 +1489,10 @@ proc playerText(sim: SimServer, playerIndex: int): string =
     return "unknown"
   playerColorText(sim.players[playerIndex].color)
 
-proc logGameEvent(text: string) =
+proc logGameEvent(sim: SimServer, text: string) =
   ## Writes one game event to stdout for Docker logs.
-  echo text
+  if sim.gameEventLoggingEnabled:
+    echo text
 
 proc voteTargetText(sim: SimServer, vote: int): string =
   ## Returns a readable vote target.
@@ -1511,7 +1513,7 @@ proc logLobbyWaiting(sim: var SimServer) =
   sim.lastLobbyPlayersLogged = players
   sim.lastLobbyNeededLogged = needed
   sim.lastLobbySecondsLogged = -1
-  logGameEvent(
+  sim.logGameEvent(
     "waiting for players: " & $players & "/" &
       $sim.config.minPlayers & ", need " & $needed & " more"
   )
@@ -1522,7 +1524,7 @@ proc logLobbyCountdown(sim: var SimServer) =
   if seconds <= 0 or seconds == sim.lastLobbySecondsLogged:
     return
   sim.lastLobbySecondsLogged = seconds
-  logGameEvent("game starting in " & $seconds)
+  sim.logGameEvent("game starting in " & $seconds)
 
 proc lobbyIconStartY*(sim: SimServer): int =
   ## Returns the lobby icon row y coordinate.
@@ -2308,7 +2310,7 @@ proc settleAllCompletedTaskRewards(sim: var SimServer) =
     sim.settleCompletedTaskRewards(i)
 
 proc startGame*(sim: var SimServer) =
-  logGameEvent(
+  sim.logGameEvent(
     "game started: players=" & $sim.players.len &
       ", imposters=" & $sim.config.effectiveImposterCount(sim.players.len)
   )
@@ -2535,7 +2537,7 @@ proc tryKill*(sim: var SimServer, killerIndex: int) =
       bestDist = d
       bestTarget = i
   if bestTarget >= 0:
-    logGameEvent(
+    sim.logGameEvent(
       playerColorText(sim.players[bestTarget].color) &
         " killed by " & playerColorText(killer.color) & " (imposter)"
     )
@@ -2603,17 +2605,17 @@ proc startVote*(
   ## Starts a voting meeting and logs its cause.
   case kind
   of VoteCalledBody:
-    logGameEvent(
+    sim.logGameEvent(
       "vote called: " & sim.playerText(callerIndex) &
         " called body (" & playerColorText(bodyColor) & ")"
     )
   of VoteCalledButton:
-    logGameEvent(
+    sim.logGameEvent(
       "vote called: " & sim.playerText(callerIndex) &
         " called emergency button"
     )
   of VoteCalledUnknown:
-    logGameEvent("vote called")
+    sim.logGameEvent("vote called")
   sim.phase = Voting
   sim.chatMessages.setLen(0)
   let n = sim.players.len
@@ -2654,7 +2656,7 @@ proc addVotingChat*(sim: var SimServer, playerIndex: int, message: string) =
     color: sim.players[playerIndex].color,
     text: text
   )
-  logGameEvent(
+  sim.logGameEvent(
     "vote chat: " & sim.playerText(playerIndex) & ": " & text
   )
 
@@ -3143,10 +3145,10 @@ proc tallyVotes*(sim: var SimServer, timedOut = false) =
       tied = true
   if tied or maxVotes == 0 or maxPlayer < 0:
     sim.voteState.ejectedPlayer = -1
-    logGameEvent("vote ended: no one killed by vote")
+    sim.logGameEvent("vote ended: no one killed by vote")
   else:
     sim.voteState.ejectedPlayer = maxPlayer
-    logGameEvent(
+    sim.logGameEvent(
       "vote ended: " & sim.playerText(maxPlayer) & " killed by vote"
     )
   sim.phase = VoteResult
@@ -3203,7 +3205,7 @@ proc applyStuckPenalty(sim: var SimServer, playerIndex: int) =
     return
   sim.addReward(playerIndex, StuckPenalty)
   sim.players[playerIndex].lastMoveTick = sim.tickCount
-  logGameEvent("stuck penalty: " & sim.playerText(playerIndex))
+  sim.logGameEvent("stuck penalty: " & sim.playerText(playerIndex))
 
 proc trackMovementAndStuckPenalty(
   sim: var SimServer,
@@ -3237,9 +3239,9 @@ proc finishGame*(sim: var SimServer, winner: PlayerRole, timeLimitReached = fals
     return
   sim.settleAllCompletedTaskRewards()
   if timeLimitReached:
-    logGameEvent("draw: time limit reached")
+    sim.logGameEvent("draw: time limit reached")
   else:
-    logGameEvent(roleText(winner) & " win")
+    sim.logGameEvent(roleText(winner) & " win")
   sim.phase = GameOver
   sim.winner = winner
   sim.gameOverTimer = sim.config.gameOverTicks
@@ -3800,6 +3802,7 @@ proc initSimServer*(config: GameConfig): SimServer =
   result.nextJoinOrder = 0
   result.gameStartTick = -1
   result.startWaitTimer = 0
+  result.gameEventLoggingEnabled = true
   result.lastLobbyPlayersLogged = -1
   result.lastLobbyNeededLogged = -1
   result.lastLobbySecondsLogged = -1
@@ -3911,7 +3914,7 @@ proc step*(
           sim.voteState.votes[i] = -2
         else:
           sim.voteState.votes[i] = cur
-        logGameEvent(
+        sim.logGameEvent(
           "vote cast: " & sim.playerText(i) & " voted " &
             sim.voteTargetText(sim.voteState.votes[i])
         )
