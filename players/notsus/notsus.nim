@@ -5891,7 +5891,7 @@ when isMainModule and not defined(italkalotLibrary):
   proc readBotRunConfig(): BotRunConfig =
     ## Reads command-line options for one bot process.
     result = BotRunConfig(
-      url: getEnv("COWORLD_PLAYER_WS_URL"),
+      url: getEnv("COWORLD_PLAYER_WS_URL", getEnv("COGAMES_ENGINE_WS_URL")),
       address: DefaultHost,
       port: PlayerDefaultPort,
       slot: -1
