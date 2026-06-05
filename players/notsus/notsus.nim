@@ -1,5 +1,5 @@
 import
-  bitworld/[bitstreamprotocol, server],
+  bitworld/[spriteprotocol, server],
   pixie,
   ../../src/crewrift/[sim, texts],
   notsus/[protocols, votereader]
@@ -1866,7 +1866,7 @@ proc applyProtocolVotingState(
 
 proc updateProtocolDetections(bot: var Bot, client: ProtocolClient) {.measure.} =
   ## Caches structured task objects from the current sprite frame.
-  bot.spriteDetectionsReady = client.mode == WireSprite
+  bot.spriteDetectionsReady = true
   bot.protocolCameraReady = false
   bot.protocolInterstitialReady = false
   bot.protocolInterstitialText = ""
@@ -5737,8 +5737,7 @@ when not defined(italkalotLibrary):
     url = "",
     token = "",
     slot = -1,
-    exitOnDisconnect = false,
-    protocolMode = WireSprite
+    exitOnDisconnect = false
   ) =
     ## Connects to a Crewrift server and processes player frames.
     ## If `url` is non-empty it is used as the WebSocket endpoint (scheme,
@@ -5751,7 +5750,7 @@ when not defined(italkalotLibrary):
       if url.len > 0: ensureWsPath(url, WebSocketPath)
       else: "ws://" & host & ":" & $port & WebSocketPath
     let connectUrl = playerConnectUrl(endpoint, name, token, slot)
-    let client = initProtocolClient(protocolMode)
+    let client = initProtocolClient()
     var
       viewer =
         if gui: initViewerApp()
@@ -5761,8 +5760,7 @@ when not defined(italkalotLibrary):
     while viewer.viewerOpen():
       try:
         let ws = newWebSocket(connectUrl)
-        echo "connected to ", connectUrl,
-          " protocol=", protocolMode.protocolName()
+        echo "connected to ", connectUrl, " protocol=sprite"
         notifiedFailure = false
         var lastMask = 0xff'u8
         client.reset()
@@ -5823,18 +5821,18 @@ when not defined(italkalotLibrary):
           bot.lastMask = nextMask
           if nextMask != lastMask:
             if gui:
-              ws.send(protocolMode.inputBlob(nextMask), BinaryMessage)
+              ws.send(inputBlob(nextMask), BinaryMessage)
             else:
               profileBlock "send input":
-                ws.send(protocolMode.inputBlob(nextMask), BinaryMessage)
+                ws.send(inputBlob(nextMask), BinaryMessage)
             lastMask = nextMask
           if bot.pendingChatReady():
             if gui:
-              ws.send(protocolMode.chatBlob(bot.pendingChat), BinaryMessage)
+              ws.send(chatBlob(bot.pendingChat), BinaryMessage)
               bot.pendingChat = ""
             else:
               profileBlock "send chat":
-                ws.send(protocolMode.chatBlob(bot.pendingChat), BinaryMessage)
+                ws.send(chatBlob(bot.pendingChat), BinaryMessage)
                 bot.pendingChat = ""
       except Exception as e:
         if connected:
@@ -5866,7 +5864,6 @@ when isMainModule and not defined(italkalotLibrary):
       token: string
       slot: int
       exitOnDisconnect: bool
-      protocolMode: WireProtocolMode
 
   proc requireOptionValue(key, val: string) =
     ## Raises when one command-line option is missing its value.
@@ -5897,8 +5894,7 @@ when isMainModule and not defined(italkalotLibrary):
       url: getEnv("COWORLD_PLAYER_WS_URL"),
       address: DefaultHost,
       port: PlayerDefaultPort,
-      slot: -1,
-      protocolMode: WireSprite
+      slot: -1
     )
     var
       addressSet = false
@@ -5939,9 +5935,6 @@ when isMainModule and not defined(italkalotLibrary):
               "Option --gui does not take a value."
             )
           result.gui = true
-        of "protocol":
-          key.requireOptionValue(val)
-          result.protocolMode = parseProtocolMode(val)
         else:
           raise newException(ValueError, "Unknown option: --" & key)
       of cmdShortOption:
@@ -5960,8 +5953,7 @@ when isMainModule and not defined(italkalotLibrary):
       config.url
     else:
       "ws://" & config.address & ":" & $config.port
-  echo "starting truecrew -> ", target,
-    " protocol=", config.protocolMode.protocolName()
+  echo "starting truecrew -> ", target, " protocol=sprite"
   addExitProc(finishProfileTrace)
   runBot(
     config.address,
@@ -5972,6 +5964,5 @@ when isMainModule and not defined(italkalotLibrary):
     config.url,
     config.token,
     config.slot,
-    config.exitOnDisconnect,
-    config.protocolMode
+    config.exitOnDisconnect
   )

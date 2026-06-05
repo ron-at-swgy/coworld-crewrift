@@ -1,19 +1,14 @@
 import
   std/[algorithm, options, strutils],
-  bitworld/[profile, bitstreamprotocol, server],
+  bitworld/[profile, spriteprotocol, server],
   pixie, supersnappy, whisky
 
 const
   MaxFrameDrain* = 128
-  FrameDropThreshold* = 32
   MapSpriteId = 1
   MapObjectId = 1
 
 type
-  WireProtocolMode* = enum
-    WireBitstream
-    WireSprite
-
   SpriteInfo* = ref object
     defined*: bool
     width*: int
@@ -41,8 +36,6 @@ type
     height*: int
 
   ProtocolClient* = ref object
-    mode*: WireProtocolMode
-    queuedFrames: seq[string]
     sprite: SpriteState
     spritePending: int
     frameAdvance*: int
@@ -58,16 +51,16 @@ type
     walkabilityMask*: seq[bool]
     packed*: seq[uint8]
     unpacked*: seq[uint8]
+    packetBytes: seq[uint8]
     objectIds: seq[int]
 
 proc initSpriteState(): SpriteState =
   ## Builds the initial sprite protocol state.
   SpriteState()
 
-proc initProtocolClient*(mode: WireProtocolMode): ProtocolClient =
+proc initProtocolClient*(): ProtocolClient =
   ## Builds protocol state for one websocket connection.
   result = ProtocolClient(
-    mode: mode,
     sprite: initSpriteState(),
     packed: newSeq[uint8](ProtocolBytes),
     unpacked: newSeq[uint8](ScreenWidth * ScreenHeight)
@@ -75,7 +68,6 @@ proc initProtocolClient*(mode: WireProtocolMode): ProtocolClient =
 
 proc reset*(client: ProtocolClient) =
   ## Clears queued wire data while preserving reusable frame buffers.
-  client.queuedFrames.setLen(0)
   client.sprite = initSpriteState()
   client.spritePending = 0
   client.frameAdvance = 0
@@ -89,24 +81,6 @@ proc reset*(client: ProtocolClient) =
   client.walkabilityWidth = 0
   client.walkabilityHeight = 0
   client.walkabilityMask.setLen(0)
-
-proc protocolName*(mode: WireProtocolMode): string =
-  ## Returns a short protocol mode name.
-  case mode
-  of WireBitstream:
-    "bitstream"
-  of WireSprite:
-    "sprite"
-
-proc parseProtocolMode*(value: string): WireProtocolMode =
-  ## Parses one command line protocol mode.
-  case value.toLowerAscii()
-  of "bitstream", "bits", "frame", "frames", "old":
-    WireBitstream
-  of "", "sprite", "sprites", "new":
-    WireSprite
-  else:
-    raise newException(ValueError, "Unknown protocol mode: " & value)
 
 proc queryEscape*(value: string): string =
   ## Escapes a small string for use in a websocket query parameter.
@@ -130,26 +104,6 @@ proc addQueryParam*(url, key, value: string): string =
   if value.len == 0 or url.hasQueryParam(key):
     return url
   url & (if '?' in url: "&" else: "?") & key & "=" & value.queryEscape()
-
-proc blobToBytes*(blob: string, bytes: var seq[uint8]) {.measure.} =
-  ## Copies websocket blob bytes into a reusable byte buffer.
-  if bytes.len != blob.len:
-    bytes.setLen(blob.len)
-  for i in 0 ..< blob.len:
-    bytes[i] = blob[i].uint8
-
-proc blobFromMask*(mask: uint8): string =
-  ## Builds a legacy bitstream input packet from one input mask.
-  result = newString(InputPacketBytes)
-  result[0] = char(PacketInput)
-  result[1] = char(mask)
-
-proc blobFromChat*(text: string): string =
-  ## Builds a legacy bitstream chat packet from ASCII text.
-  result = newString(text.len + 1)
-  result[0] = char(PacketChat)
-  for i, ch in text:
-    result[i + 1] = ch
 
 proc playerConnectUrl*(
   endpoint,
@@ -183,38 +137,12 @@ proc ensureWsPath*(url: string, defaultPath: string): string =
   url & defaultPath
 
 proc inputBlob*(mask: uint8): string =
-  ## Builds one legacy player input packet.
-  blobFromMask(mask)
-
-proc inputBlob*(mode: WireProtocolMode, mask: uint8): string =
-  ## Builds one player input packet for the selected protocol.
-  case mode
-  of WireBitstream:
-    blobFromMask(mask)
-  of WireSprite:
-    blobFromBytes([0x84'u8, mask and 0x7f'u8])
+  ## Builds one sprite player input packet.
+  blobFromSpriteMask(mask)
 
 proc chatBlob*(text: string): string =
-  ## Builds one legacy player chat packet.
-  blobFromChat(text)
-
-proc addU16(packet: var seq[uint8], value: int) =
-  ## Appends one little endian unsigned 16 bit value.
-  let v = uint16(value)
-  packet.add(uint8(v and 0xff'u16))
-  packet.add(uint8(v shr 8))
-
-proc chatBlob*(mode: WireProtocolMode, text: string): string =
-  ## Builds one player chat packet for the selected protocol.
-  case mode
-  of WireBitstream:
-    blobFromChat(text)
-  of WireSprite:
-    var bytes: seq[uint8] = @[0x81'u8]
-    bytes.addU16(text.len)
-    for ch in text:
-      bytes.add(uint8(ord(ch)))
-    blobFromBytes(bytes)
+  ## Builds one sprite player chat packet.
+  blobFromSpriteChat(text)
 
 proc unpack4bpp*(
   packed: openArray[uint8],
@@ -232,7 +160,7 @@ proc pack4bpp*(
   unpacked: openArray[uint8],
   packed: var seq[uint8]
 ) {.measure.} =
-  ## Packs palette indices into the old 4 bit framebuffer layout.
+  ## Packs palette indices into the 4 bit framebuffer layout.
   let targetLen = unpacked.len div 2
   if packed.len != targetLen:
     packed.setLen(targetLen)
@@ -272,7 +200,7 @@ proc spriteObjectsWithLabel*(
   label: string
 ): seq[SpriteObjectInfo] =
   ## Returns present sprite objects whose sprite label matches exactly.
-  if client.mode != WireSprite or client.sprite.isNil:
+  if client.sprite.isNil:
     return
   for objectId, objectState in client.sprite.objects:
     if not objectState.present:
@@ -299,7 +227,7 @@ iterator spriteObjects*(
   label: string
 ] =
   ## Iterates present sprite objects with their sprite metadata.
-  if client.mode == WireSprite and not client.sprite.isNil:
+  if not client.sprite.isNil:
     for objectId, objectState in client.sprite.objects:
       if not objectState.present:
         continue
@@ -324,7 +252,7 @@ iterator spriteObjectRefs*(
   sprite: SpriteInfo
 ] =
   ## Iterates present sprite objects with a metadata reference.
-  if client.mode == WireSprite and not client.sprite.isNil:
+  if not client.sprite.isNil:
     for objectId, objectState in client.sprite.objects:
       if not objectState.present:
         continue
@@ -337,24 +265,6 @@ iterator spriteObjectRefs*(
         y: objectState.y,
         sprite: sprite
       )
-
-proc readU16(blob: string, offset: int): int =
-  ## Reads one little endian unsigned 16 bit value.
-  int(uint16(blob[offset].uint8) or
-    (uint16(blob[offset + 1].uint8) shl 8))
-
-proc readI16(blob: string, offset: int): int =
-  ## Reads one little endian signed 16 bit value.
-  let value = uint16(blob[offset].uint8) or
-    (uint16(blob[offset + 1].uint8) shl 8)
-  int(cast[int16](value))
-
-proc readU32(blob: string, offset: int): int =
-  ## Reads one little endian unsigned 32 bit value.
-  int(uint32(blob[offset].uint8) or
-    (uint32(blob[offset + 1].uint8) shl 8) or
-    (uint32(blob[offset + 2].uint8) shl 16) or
-    (uint32(blob[offset + 3].uint8) shl 24))
 
 proc decodeSpritePixels(
   width,
@@ -406,115 +316,76 @@ proc applySpritePacket(
   decodePixels: bool
 ): bool {.measure.} =
   ## Applies sprite protocol messages to the retained scene state.
-  var offset = 0
-  while offset < packet.len:
-    let messageType = packet[offset].uint8
-    inc offset
-    case messageType
-    of 0x01:
-      if offset + 10 > packet.len:
-        return false
-      let
-        spriteId = packet.readU16(offset)
-        width = packet.readU16(offset + 2)
-        height = packet.readU16(offset + 4)
-        compressedLen = packet.readU32(offset + 6)
-      offset += 10
-      if compressedLen < 0 or offset + compressedLen + 2 > packet.len:
-        return false
-      let compressedStart = offset
-      offset += compressedLen
-      let labelLen = packet.readU16(offset)
-      offset += 2
-      if offset + labelLen > packet.len:
-        return false
-      let label =
-        if labelLen > 0:
-          packet.substr(offset, offset + labelLen - 1)
-        else:
-          ""
-      offset += labelLen
-      let
-        shouldDecodeWalkability = label == "walkability map"
-        shouldDecodePixels = decodePixels
-      var
-        compressed = ""
-        pixels: seq[uint8]
-      if shouldDecodeWalkability or shouldDecodePixels:
-        compressed =
-          if compressedLen > 0:
-            packet.substr(compressedStart, compressedStart + compressedLen - 1)
-          else:
-            ""
-      if shouldDecodeWalkability:
-        if not decodeWalkabilityPixels(
-          width,
-          height,
-          compressed,
-          client.walkabilityMask
-        ):
-          return false
-        client.walkabilityReady = true
-        client.walkabilityWidth = width
-        client.walkabilityHeight = height
-      if shouldDecodePixels:
-        if not decodeSpritePixels(width, height, compressed, pixels):
-          return false
-      client.sprite.ensureSprite(spriteId)
-      client.sprite.sprites[spriteId] = SpriteInfo(
-        defined: true,
-        width: width,
-        height: height,
-        label: label,
-        pixels: pixels
-      )
-    of 0x02:
-      if offset + 11 > packet.len:
-        return false
-      let
-        objectId = packet.readU16(offset)
-        x = packet.readI16(offset + 2)
-        y = packet.readI16(offset + 4)
-        z = packet.readI16(offset + 6)
-        layer = int(packet[offset + 8].uint8)
-        spriteId = packet.readU16(offset + 9)
-      offset += 11
-      client.sprite.ensureObject(objectId)
-      client.sprite.objects[objectId] = ObjectState(
-        present: true,
-        x: x,
-        y: y,
-        z: z,
-        layer: layer,
-        spriteId: spriteId
-      )
-      if objectId == MapObjectId and spriteId == MapSpriteId:
-        client.mapCameraReady = true
-        client.mapCameraX = -x
-        client.mapCameraY = -y
-    of 0x03:
-      if offset + 2 > packet.len:
-        return false
-      let objectId = packet.readU16(offset)
-      offset += 2
-      if objectId >= 0 and objectId < client.sprite.objects.len:
-        client.sprite.objects[objectId].present = false
-      if objectId == MapObjectId:
+  blobToBytes(packet, client.packetBytes)
+  try:
+    for message in parseSpritePacket(client.packetBytes):
+      case message.kind
+      of spkSprite:
+        let sprite = message.sprite
+        let
+          shouldDecodeWalkability = sprite.label == "walkability map"
+          shouldDecodePixels = decodePixels
+        var
+          compressed = ""
+          pixels: seq[uint8]
+        if shouldDecodeWalkability or shouldDecodePixels:
+          compressed = blobFromBytes(sprite.compressedPixels)
+        if shouldDecodeWalkability:
+          if not decodeWalkabilityPixels(
+            sprite.width,
+            sprite.height,
+            compressed,
+            client.walkabilityMask
+          ):
+            return false
+          client.walkabilityReady = true
+          client.walkabilityWidth = sprite.width
+          client.walkabilityHeight = sprite.height
+        if shouldDecodePixels:
+          if not decodeSpritePixels(
+            sprite.width,
+            sprite.height,
+            compressed,
+            pixels
+          ):
+            return false
+        client.sprite.ensureSprite(sprite.id)
+        client.sprite.sprites[sprite.id] = SpriteInfo(
+          defined: true,
+          width: sprite.width,
+          height: sprite.height,
+          label: sprite.label,
+          pixels: pixels
+        )
+      of spkObject:
+        let objectDef = message.objectDef
+        client.sprite.ensureObject(objectDef.id)
+        client.sprite.objects[objectDef.id] = ObjectState(
+          present: true,
+          x: objectDef.x,
+          y: objectDef.y,
+          z: objectDef.z,
+          layer: objectDef.layer,
+          spriteId: objectDef.spriteId
+        )
+        if objectDef.id == MapObjectId and objectDef.spriteId == MapSpriteId:
+          client.mapCameraReady = true
+          client.mapCameraX = -objectDef.x
+          client.mapCameraY = -objectDef.y
+      of spkDeleteObject:
+        let objectId = message.objectId
+        if objectId >= 0 and objectId < client.sprite.objects.len:
+          client.sprite.objects[objectId].present = false
+        if objectId == MapObjectId:
+          client.mapCameraReady = false
+      of spkClearObjects:
+        for item in client.sprite.objects.mitems:
+          item.present = false
         client.mapCameraReady = false
-    of 0x04:
-      for item in client.sprite.objects.mitems:
-        item.present = false
-      client.mapCameraReady = false
-    of 0x05:
-      if offset + 5 > packet.len:
-        return false
-      offset += 5
-    of 0x06:
-      if offset + 3 > packet.len:
-        return false
-      offset += 3
-    else:
-      return false
+      of spkViewport, spkLayer:
+        discard
+  except SpriteProtocolError:
+    return false
   true
 
 proc objectCmp(state: SpriteState, a, b: int): int =
@@ -590,14 +461,9 @@ proc acceptPlayerMessage(
   ## Handles one websocket message and updates the active parser.
   case message.kind
   of BinaryMessage:
-    case client.mode
-    of WireBitstream:
-      if message.data.len == ProtocolBytes:
-        client.queuedFrames.add(message.data)
-    of WireSprite:
-      if not client.applySpritePacket(message.data, decodePixels):
-        raise newException(ValueError, "Malformed sprite protocol packet.")
-      inc client.spritePending
+    if not client.applySpritePacket(message.data, decodePixels):
+      raise newException(ValueError, "Malformed sprite protocol packet.")
+    inc client.spritePending
   of Ping:
     ws.send(message.data, Pong)
   of TextMessage, Pong:
@@ -612,7 +478,7 @@ proc receiveLatestFrameInto*(
 ): bool {.measure.} =
   ## Receives wire data and updates the provided reusable frame buffers.
   client.frameAdvance = 0
-  if client.queuedFrames.len == 0 and client.spritePending == 0:
+  if client.spritePending == 0:
     let firstMessage = ws.receiveMessage(if gui: 10 else: -1)
     if firstMessage.isNone:
       client.frameBufferLen = 0
@@ -628,39 +494,17 @@ proc receiveLatestFrameInto*(
     ws.acceptPlayerMessage(message.get, client, gui)
     inc drained
 
-  case client.mode
-  of WireBitstream:
-    if client.queuedFrames.len == 0:
-      client.frameBufferLen = 0
-      client.framesDropped = 0
-      return false
-    var frame = ""
-    client.frameAdvance = 1
-    client.framesDropped = 0
-    if client.queuedFrames.len >= FrameDropThreshold:
-      client.framesDropped = client.queuedFrames.len - 1
-      client.frameAdvance = client.queuedFrames.len
-      frame = client.queuedFrames[^1]
-      client.queuedFrames.setLen(0)
-    else:
-      frame = client.queuedFrames[0]
-      client.queuedFrames.delete(0)
-    client.frameBufferLen = client.queuedFrames.len
-    client.skippedFrames += client.framesDropped
-    blobToBytes(frame, packed)
-    unpack4bpp(packed, unpacked)
-  of WireSprite:
-    if client.spritePending == 0:
-      client.frameBufferLen = 0
-      client.framesDropped = 0
-      return false
-    client.frameAdvance = client.spritePending
-    client.framesDropped = max(0, client.spritePending - 1)
+  if client.spritePending == 0:
     client.frameBufferLen = 0
-    client.skippedFrames += client.framesDropped
-    client.spritePending = 0
-    if gui:
-      client.renderSpriteFrame(unpacked, packed)
+    client.framesDropped = 0
+    return false
+  client.frameAdvance = client.spritePending
+  client.framesDropped = max(0, client.spritePending - 1)
+  client.frameBufferLen = 0
+  client.skippedFrames += client.framesDropped
+  client.spritePending = 0
+  if gui:
+    client.renderSpriteFrame(unpacked, packed)
   true
 
 proc receiveLatestFrame*(
