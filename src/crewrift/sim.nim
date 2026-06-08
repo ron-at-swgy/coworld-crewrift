@@ -3278,8 +3278,6 @@ proc finishGame*(sim: var SimServer, winner: PlayerRole, timeLimitReached = fals
   for i in 0 ..< sim.rewardAccounts.len:
     if i < awardedAccounts.len and awardedAccounts[i]:
       continue
-    if sim.rewardAccounts[i].abandoned:
-      continue
     if not sim.rewardAccounts[i].hasRole or sim.rewardAccounts[i].role != winner:
       continue
     sim.rewardAccounts[i].reward += WinReward
