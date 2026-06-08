@@ -132,7 +132,7 @@ suite "stats":
     check sim.players[playerIndex].reward == TaskReward + WinReward
     check sim.accountFor("last-task").tasks == 1
 
-  test "active disconnect removes task burden and forfeits win":
+  test "active disconnect removes task burden and keeps role win":
     var config = defaultGameConfig()
     config.minPlayers = 4
     config.imposterCount = 1
@@ -169,7 +169,8 @@ suite "stats":
     check sim.winner == Crewmate
 
     let results = parseJson(sim.playerResultsJson())
-    check not results["win"][1].getBool()
+    check results["win"][1].getBool()
+    check results["scores"][1].getInt() == WinReward
     check results["win"][2].getBool()
     check results["win"][3].getBool()
 
