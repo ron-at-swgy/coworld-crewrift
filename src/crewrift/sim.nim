@@ -3,7 +3,8 @@ import
   bitworld/aseprite, bitworld/client as bitworldClient,
   bitworld/pixelfonts, bitworld/profile, bitworld/spriteprotocol, bitworld/resources,
   bitworld/server,
-  jsony, pixie
+  jsony, pixie,
+  tasks as taskAssignments
 
 const
   GameName* = "crewrift"
@@ -1502,10 +1503,37 @@ proc playerText(sim: SimServer, playerIndex: int): string =
     return "unknown"
   playerColorText(sim.players[playerIndex].color)
 
+proc taskIdsText(tasks: openArray[int]): string =
+  ## Returns a compact comma-separated task id list.
+  for i, task in tasks:
+    if i > 0:
+      result.add ","
+    result.add $task
+
 proc logGameEvent(sim: SimServer, text: string) =
   ## Writes one game event to stdout for Docker logs.
   if sim.gameEventLoggingEnabled:
     echo text
+
+proc logTaskAssignments(
+  sim: SimServer,
+  crew: openArray[int],
+  assignments: openArray[taskAssignments.TaskAssignment]
+) =
+  ## Logs a compact table of crewmate tasks and route distances.
+  if crew.len == 0:
+    return
+  sim.logGameEvent("crewmate tasks:")
+  sim.logGameEvent("slot  color       path  tasks")
+  sim.logGameEvent("----  ----------  ----  ----------------")
+  for i, playerIndex in crew:
+    let assignment = assignments[i]
+    sim.logGameEvent(
+      align($sim.players[playerIndex].joinOrder, 4) & "  " &
+      align(sim.playerText(playerIndex), 10) & "  " &
+      align($assignment.routeCost, 4) & "  " &
+      assignment.taskIds.taskIdsText()
+    )
 
 proc voteTargetText(sim: SimServer, vote: int): string =
   ## Returns a readable vote target.
@@ -2353,17 +2381,33 @@ proc startGame*(sim: var SimServer) =
     sim.players[candidates[i]].role = Imposter
   for i in 0 ..< sim.players.len:
     sim.recordGameRoleAssigned(i)
+  var
+    crew: seq[int] = @[]
+    taskRects: seq[taskAssignments.TaskRect] = @[]
   for i in 0 ..< sim.players.len:
-    if sim.players[i].role == Imposter:
-      continue
-    var indices: seq[int] = @[]
-    for t in 0 ..< sim.tasks.len:
-      indices.add(t)
-    for j in countdown(indices.high, 1):
-      let k = sim.rng.rand(j)
-      swap(indices[j], indices[k])
-    sim.players[i].assignedTasks =
-      indices[0 ..< min(sim.config.tasksPerPlayer, indices.len)]
+    if sim.players[i].role == Crewmate:
+      crew.add(i)
+  for task in sim.tasks:
+    taskRects.add taskAssignments.TaskRect(
+      x: task.x,
+      y: task.y,
+      w: task.w,
+      h: task.h
+    )
+  let taskDetails = taskAssignments.assignTaskDetails(
+    taskRects,
+    sim.walkMask,
+    MapWidth,
+    MapHeight,
+    sim.gameMap.home.x,
+    sim.gameMap.home.y,
+    crew.len,
+    sim.config.tasksPerPlayer,
+    sim.rng
+  )
+  for i, playerIndex in crew:
+    sim.players[playerIndex].assignedTasks = taskDetails[i].taskIds
+  sim.logTaskAssignments(crew, taskDetails)
   for player in sim.players.mitems:
     player.lastMoveTick = sim.tickCount
   sim.roleRevealTimer = sim.config.roleRevealTicks

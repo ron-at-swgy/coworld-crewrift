@@ -12,6 +12,7 @@ import
   test_replay_controls,
   test_slots,
   test_start_wait,
+  test_tasks,
   test_stats,
   test_vote_cooldown,
   test_vote_cursor_input,
