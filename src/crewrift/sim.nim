@@ -94,7 +94,11 @@ const
   MapSpriteId* = 1
   MapObjectId* = 1
   MapLayerId* = 0
+  PovLayerId* = 7
+  PovObjectIdOffset* = 30000
+  PovSpriteIdOffset* = 30000
   MapLayerType* = 0
+  FullScreenLayerType* = 9
   TopLeftLayerId* = 1
   TopLeftLayerType* = 1
   BottomRightLayerId* = 3

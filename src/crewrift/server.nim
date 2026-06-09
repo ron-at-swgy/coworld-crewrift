@@ -1065,6 +1065,7 @@ proc runServerLoop*(
             replaySeekTicks.add(state.replaySeekTick)
           for command in state.replayCommands:
             replayCommands.add(command)
+          appState.globalViewers[websocket].clearGlobalMouseEdges()
           appState.globalViewers[websocket].replayCommands.setLen(0)
           appState.globalViewers[websocket].replaySeekTick = -1
         for websocket in appState.rewardViewers.keys:
@@ -1267,6 +1268,9 @@ proc runServerLoop*(
         {.gcsafe.}:
           withLock appState.lock:
             if globalViewers[i] in appState.globalViewers:
+              nextState.mergeGlobalMouseEdges(
+                appState.globalViewers[globalViewers[i]]
+              )
               appState.globalViewers[globalViewers[i]] = nextState
       except:
         {.gcsafe.}:
