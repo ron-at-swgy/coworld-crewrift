@@ -9,6 +9,7 @@ import
   test_map_markers,
   test_max_ticks,
   test_movement_slide,
+  test_replay,
   test_replay_controls,
   test_rooms,
   test_slots,
