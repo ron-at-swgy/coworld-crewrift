@@ -18,6 +18,7 @@ import std/[algorithm, exitprocs, heapqueue, monotimes, options, os,
   parseopt, random, strutils, times]
 
 const
+  ReconnectWindowMs = 60_000
   PlayerScreenX = ScreenWidth div 2
   PlayerScreenY = ScreenHeight div 2
   PlayerWorldOffX = SpriteDrawOffX + PlayerScreenX - SpriteSize div 2
@@ -5799,6 +5800,7 @@ when not defined(italkalotLibrary):
         else: nil
       connected = false
       notifiedFailure = false
+      disconnectStart = getMonoTime()
     while viewer.viewerOpen():
       try:
         let ws = newWebSocket(connectUrl)
@@ -5881,10 +5883,15 @@ when not defined(italkalotLibrary):
           echo "connection lost: ", e.msg
           if exitOnDisconnect:
             break
+          disconnectStart = getMonoTime()
         elif not notifiedFailure:
           echo "connection failed: ", e.msg
           notifiedFailure = true
         connected = false
+        if (getMonoTime() - disconnectStart).inMilliseconds >= ReconnectWindowMs:
+          echo "reconnect window exhausted after ",
+            ReconnectWindowMs div 1000, "s; exiting"
+          break
         if gui:
           let reconnectStart = getMonoTime()
           while viewer.viewerOpen() and
