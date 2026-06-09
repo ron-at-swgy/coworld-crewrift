@@ -70,12 +70,18 @@ suite "notsus replay":
       sim = data.initReplaySim()
       replay = initReplayPlayer(data)
     replay.looping = false
-    replay.mismatchQuit = true
+    replay.mismatchQuit = false
 
-    while replay.playing:
-      replay.stepReplay(sim)
+    check data.hashes.len > 0
+    for expected in data.hashes:
+      while sim.tickCount < int(expected.tick):
+        doAssert replay.playing,
+          "Replay stopped before hash tick " & $expected.tick
+        replay.stepReplay(sim)
+      check sim.tickCount == int(expected.tick)
+      check sim.gameHash() == expected.hash
 
     check replay.hashIndex == data.hashes.len
     check not replay.hashValidationFailed
     check replay.hashMismatchTick == -1
-    check sim.tickCount >= int(data.hashes[^1].tick)
+    check sim.tickCount == int(data.hashes[^1].tick)
