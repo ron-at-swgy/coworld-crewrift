@@ -11,7 +11,7 @@ const
   MeetingLeftObjectX = 29
   MeetingRightObjectX = 79
   MeetingIconObjectY = 73
-  MeetingButtonObjectX = 31
+  MeetingButtonObjectX = 81
   MeetingButtonObjectY = 75
 
 proc initCrewriftForTest(config: GameConfig): SimServer =
@@ -145,7 +145,7 @@ suite "meeting call interstitial":
     check sim.phase == Voting
     check sim.voteState.voteTimer == sim.config.voteTimerTicks
 
-  test "button call shows reporter and button":
+  test "button call shows reporter left and button right":
     var sim = initCrewriftForTest(defaultGameConfig())
     sim.addPlayers(3)
     sim.phase = Playing
@@ -168,8 +168,8 @@ suite "meeting call interstitial":
       sprites,
       ProtocolMeetingIconObjectBase + 1
     ) == "meeting button"
-    check playerObject.x == MeetingRightObjectX
+    check playerObject.x == MeetingLeftObjectX
     check playerObject.y == MeetingIconObjectY
     check buttonObject.x == MeetingButtonObjectX
     check buttonObject.y == MeetingButtonObjectY
-    check buttonObject.x < playerObject.x
+    check buttonObject.x > playerObject.x

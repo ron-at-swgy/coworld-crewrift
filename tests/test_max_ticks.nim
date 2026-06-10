@@ -15,8 +15,8 @@ proc initCrewriftForTest(config: GameConfig): SimServer =
     setCurrentDir(previousDir)
 
 suite "max ticks":
-  test "default vote timer is ten seconds":
-    check defaultGameConfig().voteTimerTicks == TargetFps * 10
+  test "default vote timer is fifty seconds":
+    check defaultGameConfig().voteTimerTicks == TargetFps * 50
 
   test "default kill cooldown is five hundred ticks":
     check KillCooldownTicks == 500
@@ -63,7 +63,8 @@ suite "max ticks":
     config.autoImposterCount = false
     config.maxTicks = 2
     config.tasksPerPlayer = 1
-    config.startWaitTicks = 0
+    config.startWaitTicks = 2
+    config.gameInfoTicks = 2
 
     var sim = initCrewriftForTest(config)
     discard sim.addPlayer("player1")
@@ -72,6 +73,15 @@ suite "max ticks":
 
     var inputs = newSeq[InputState](sim.players.len)
     sim.step(inputs, inputs)
+    check sim.phase == Lobby
+    check sim.gameTicksElapsed() == 0
+
+    sim.step(inputs, inputs)
+    check sim.phase == GameInfo
+    check sim.gameTicksElapsed() == 0
+
+    for _ in 0 ..< sim.config.gameInfoTicks:
+      sim.step(inputs, inputs)
     check sim.phase == RoleReveal
     check sim.gameTicksElapsed() == 0
 
@@ -91,3 +101,54 @@ suite "max ticks":
 
     for player in sim.players:
       check player.reward == 0
+
+  test "meeting voting and result screens do not spend max ticks":
+    var config = defaultGameConfig()
+    config.minPlayers = 3
+    config.imposterCount = 1
+    config.autoImposterCount = false
+    config.maxTicks = 2
+    config.tasksPerPlayer = 1
+    config.startWaitTicks = 0
+    config.roleRevealTicks = 0
+    config.voteTimerTicks = 3
+    config.voteResultTicks = 2
+
+    var sim = initCrewriftForTest(config)
+    discard sim.addPlayer("player1")
+    discard sim.addPlayer("player2")
+    discard sim.addPlayer("player3")
+
+    let inputs = newSeq[InputState](sim.players.len)
+    sim.step(inputs, inputs)
+    check sim.phase == Playing
+    check sim.gameTicksElapsed() == 0
+
+    sim.step(inputs, inputs)
+    check sim.phase == Playing
+    check sim.gameTicksElapsed() == 1
+
+    sim.startVote()
+    check sim.phase == MeetingCall
+    for _ in 0 ..< MeetingCallTicks:
+      sim.step(inputs, inputs)
+    check sim.phase == Voting
+    check sim.gameTicksElapsed() == 1
+    check not sim.timeLimitReached
+
+    for _ in 0 ..< config.voteTimerTicks:
+      sim.step(inputs, inputs)
+    check sim.phase == VoteResult
+    check sim.gameTicksElapsed() == 1
+    check not sim.timeLimitReached
+
+    for _ in 0 ..< config.voteResultTicks:
+      sim.step(inputs, inputs)
+    check sim.phase == Playing
+    check sim.gameTicksElapsed() == 1
+    check not sim.timeLimitReached
+
+    sim.step(inputs, inputs)
+    check sim.phase == GameOver
+    check sim.gameTicksElapsed() == 2
+    check sim.timeLimitReached

@@ -1249,7 +1249,7 @@ proc runServerLoop*(
       let packet = sim.buildSpriteProtocolUpdates(
         globalStates[i],
         nextState,
-        sim.tickCount,
+        if replayLoaded: sim.tickCount else: sim.gameTicksElapsed(),
         replayPlayer.playing,
         if replayLoaded: replayPlayer.replaySpeed()
         else: playbackSpeed(liveSpeedIndex),

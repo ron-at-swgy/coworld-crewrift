@@ -119,25 +119,27 @@ proc testCountdownShowsGameInfo() =
   doAssert sim.gameInfoTimer == 3
   doAssert sim.gameTicksElapsed() == 0
 
-  let messages = sim.buildPlayerMessages(0)
+  let
+    messages = sim.buildPlayerMessages(0)
+    voteTimerLabel = "VOTE TIMER " & $config.voteTimerTicks & "T"
   messages.requireSpriteLabel("GAME INFO")
   messages.requireSpriteLabel("KILL COOLDOWN 500T")
   messages.requireSpriteLabel("TASKS 2 EACH")
-  messages.requireSpriteLabel("VOTE TIMER 240T")
+  messages.requireSpriteLabel(voteTimerLabel)
   messages.requireSpriteLabel("GAME TIMER 10000T")
 
   let globalMessages = sim.buildGlobalMessages()
   globalMessages.requireSpriteLabel("GAME INFO")
   globalMessages.requireSpriteLabel("KILL COOLDOWN 500T")
   globalMessages.requireSpriteLabel("TASKS 2 EACH")
-  globalMessages.requireSpriteLabel("VOTE TIMER 240T")
+  globalMessages.requireSpriteLabel(voteTimerLabel)
   globalMessages.requireSpriteLabel("GAME TIMER 10000T")
 
   let settings = sim.readNotsusGameInfo(0)
   doAssert settings.complete
   doAssert settings.killCooldownTicks == 500
   doAssert settings.tasksPerPlayer == 2
-  doAssert settings.voteTimerTicks == 240
+  doAssert settings.voteTimerTicks == config.voteTimerTicks
   doAssert settings.maxTicks == 10000
 
   sim.stepEmpty()
