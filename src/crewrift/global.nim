@@ -130,7 +130,7 @@ const
   MeetingCallIconY = 74
   MeetingCallLeftIconX = 30
   MeetingCallRightIconX = 80
-  MeetingCallButtonX = MeetingCallLeftIconX + 1
+  MeetingCallButtonX = MeetingCallRightIconX + 1
   MeetingCallButtonY = MeetingCallIconY + 1
   PlayerColorNames = [
     "red",
@@ -1690,16 +1690,11 @@ proc addProtocolMeetingCallActorSprites(
   let caller = sim.meetingCallCallerIndex()
   if caller >= 0:
     let
-      iconX =
-        if sim.voteState.callKind == VoteCalledButton:
-          MeetingCallRightIconX
-        else:
-          MeetingCallLeftIconX
       objectId = ProtocolMeetingIconObjectBase
     currentIds.addProtocolObject(
       packet,
       objectId,
-      iconX - 1,
+      MeetingCallLeftIconX - 1,
       MeetingCallIconY - 1,
       ProtocolVoteIconZ,
       layer,

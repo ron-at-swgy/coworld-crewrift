@@ -63,7 +63,7 @@ const
   ImposterCount* = 2
   AutoImposterCount* = true
   StartWaitTicks* = 5 * TargetFps
-  VoteTimerTicks* = TargetFps * 10
+  VoteTimerTicks* = TargetFps * 50
   MeetingCallTicks* = TargetFps * 3
   MessageCooldownTicks* = 100
   GameOverTicks* = 360
@@ -394,6 +394,7 @@ type
     nextJoinOrder*: int
     tickCount*: int
     gameStartTick*: int
+    gameTickCount*: int
     startWaitTimer*: int
     phase*: GamePhase
     voteState*: VoteState
@@ -2636,6 +2637,7 @@ proc startGame*(sim: var SimServer, showInfo = false) =
   sim.logTaskAssignments(crew, taskDetails)
   for player in sim.players.mitems:
     player.lastMoveTick = sim.tickCount
+  sim.gameTickCount = 0
   if showInfo and sim.config.gameInfoTicks > 0:
     sim.phase = GameInfo
     sim.gameInfoTimer = sim.config.gameInfoTicks
@@ -3607,10 +3609,8 @@ proc finishGame*(sim: var SimServer, winner: PlayerRole, timeLimitReached = fals
       inc sim.rewardAccounts[i].winsCrewmate
 
 proc gameTicksElapsed*(sim: SimServer): int =
-  ## Returns ticks elapsed since the current game left the lobby.
-  if sim.gameStartTick < 0:
-    return 0
-  max(0, sim.tickCount - sim.gameStartTick)
+  ## Returns task-phase ticks elapsed in the current game.
+  sim.gameTickCount
 
 proc maxTicksReached(sim: SimServer): bool =
   sim.config.maxTicks > 0 and
@@ -4170,6 +4170,7 @@ proc initSimServer*(config: GameConfig): SimServer =
   result.players = @[]
   result.nextJoinOrder = 0
   result.gameStartTick = -1
+  result.gameTickCount = 0
   result.startWaitTimer = 0
   result.gameInfoTimer = 0
   result.gameEventLoggingEnabled = true
@@ -4191,6 +4192,7 @@ proc resetToLobby*(sim: var SimServer) =
   sim.nextJoinOrder = 0
   sim.tickCount = 0
   sim.gameStartTick = -1
+  sim.gameTickCount = 0
   sim.startWaitTimer = 0
   sim.gameInfoTimer = 0
   sim.roleRevealTimer = 0
@@ -4369,6 +4371,7 @@ proc step*(
     sim.checkMaxTicks()
     return
 
+  inc sim.gameTickCount
   let bodiesBeforeTick = sim.bodies.len
   for playerIndex in 0 ..< sim.players.len:
     if sim.players[playerIndex].alive and
