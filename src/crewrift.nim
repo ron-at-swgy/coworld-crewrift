@@ -38,6 +38,8 @@ when isMainModule:
 
   var config = defaultGameConfig()
   config.update(runtimeConfig.config)
+  if not runtimeConfig.replayMode:
+    config.resolveRandomSeed()
   config.echoStartupConfig(runtimeConfig)
   echo "Using map file: " & config.mapPath
 

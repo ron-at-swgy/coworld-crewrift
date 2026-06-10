@@ -788,6 +788,8 @@ proc runServerLoop*(
       replayConfig
     else:
       initialConfig
+  if not replayLoaded:
+    config.resolveRandomSeed()
   var
     replayWriter = openReplayWriter(saveReplayPath, config.configJson())
     replayPlayer =
