@@ -98,9 +98,10 @@
           "default": false
         },
         "seed": {
-          "description": "Random seed.",
+          "description": "Random seed. Use -1 to pick a time-based seed.",
           "type": "integer",
-          "default": 679961
+          "minimum": -1,
+          "default": -1
         },
         "minPlayers": {
           "description": "Players needed before the game countdown starts.",
@@ -474,7 +475,7 @@
           { "name": "Player7" },
           { "name": "Player8" }
         ],
-        "seed": 679961,
+        "seed": -1,
         "minPlayers": 8,
         "imposterCount": 2,
         "autoImposterCount": false,
@@ -533,7 +534,7 @@
         { "name": "Player7" },
         { "name": "Player8" }
       ],
-      "seed": 679961,
+      "seed": -1,
       "minPlayers": 8,
       "imposterCount": 2,
       "autoImposterCount": false,

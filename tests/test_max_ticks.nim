@@ -22,6 +22,29 @@ suite "max ticks":
     check KillCooldownTicks == 500
     check defaultGameConfig().killCooldownTicks == 500
 
+  test "default seed resolves to a concrete replay seed":
+    var config = defaultGameConfig()
+    check config.seed == RandomSeedSentinel
+
+    var sim = initCrewriftForTest(config)
+    check sim.config.seed != RandomSeedSentinel
+
+    let serialized = parseJson(sim.config.configJson())
+    check serialized["seed"].getInt() == sim.config.seed
+
+  test "explicit seed stays fixed":
+    var config = defaultGameConfig()
+    config.seed = 123
+
+    var sim = initCrewriftForTest(config)
+    check sim.config.seed == 123
+
+  test "seed below random sentinel is rejected":
+    var config = defaultGameConfig()
+
+    expect ValueError:
+      config.update("""{"seed":-2}""")
+
   test "config json":
     var config = defaultGameConfig()
     config.maxTicks = 123

@@ -1,5 +1,5 @@
 import
-  std/[json, math, os, random, strutils, tables],
+  std/[json, math, os, random, strutils, tables, times],
   bitworld/aseprite, bitworld/client as bitworldClient,
   bitworld/pixelfonts, bitworld/profile, bitworld/spriteprotocol, bitworld/resources,
   bitworld/server,
@@ -78,6 +78,8 @@ const
   VoteChatCharsPerLine* = 32
   VoteChatLineCount* = 10
   VoteChatMaxChars* = VoteChatCharsPerLine * VoteChatLineCount
+  RandomSeedSentinel* = -1
+  RandomSeedMod = int(high(int32))
   ScreenPixelCount = ScreenWidth * ScreenHeight
   ShadowOriginSx =
     ScreenWidth div 2 + SpriteDrawOffX + CollisionW div 2 - SpriteSize div 2
@@ -1030,7 +1032,7 @@ proc defaultGameConfig*(): GameConfig =
     frictionDen: FrictionDen,
     maxSpeed: MaxSpeed,
     stopThreshold: StopThreshold,
-    seed: 0xA6019,
+    seed: RandomSeedSentinel,
     speed: 1,
     killRange: KillRange,
     killCooldownTicks: KillCooldownTicks,
@@ -1286,6 +1288,11 @@ proc validate(config: GameConfig) =
     raise newException(CrewriftError, "Config field motionScale must be positive.")
   if config.frictionDen <= 0:
     raise newException(CrewriftError, "Config field frictionDen must be positive.")
+  if config.seed < RandomSeedSentinel:
+    raise newException(
+      CrewriftError,
+      "Config field seed must be -1 or greater."
+    )
   if config.minPlayers < 1:
     raise newException(CrewriftError, "Config field minPlayers must be at least 1.")
   if config.minPlayers > MaxPlayers:
@@ -1416,6 +1423,17 @@ proc update*(config: var GameConfig, jsonText: string) =
   node.readConfigTokens(config.slots, config.closedRoster)
   node.readConfigPlayers(config.slots)
   config.validate()
+
+proc timeGameSeed*(): int =
+  ## Returns a positive game seed derived from wall-clock time.
+  result = int(epochTime() * 1000) mod RandomSeedMod
+  if result < 0:
+    result += RandomSeedMod
+
+proc resolveRandomSeed*(config: var GameConfig) =
+  ## Replaces the random seed sentinel with a concrete seed.
+  if config.seed == RandomSeedSentinel:
+    config.seed = timeGameSeed()
 
 proc slotRoleText(slot: PlayerSlotConfig): string =
   ## Returns a JSON role string for one slot.
@@ -3982,8 +4000,10 @@ proc writeSpritePlayerObservation*(
     sim.writeSpritePlayerObservationUiPlayers(playerIndex, output)
 
 proc initSimServer*(config: GameConfig): SimServer =
-  result.config = config
-  result.rng = initRand(config.seed)
+  var resolvedConfig = config
+  resolvedConfig.resolveRandomSeed()
+  result.config = resolvedConfig
+  result.rng = initRand(resolvedConfig.seed)
   loadPalette(clientDataDir() / "pallete.png")
   result.asciiSprites = readTiny5Font()
 
