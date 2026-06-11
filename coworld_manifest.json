@@ -476,6 +476,7 @@
           { "name": "Player8" }
         ],
         "seed": -1,
+        "closedRoster": true,
         "minPlayers": 8,
         "imposterCount": 2,
         "autoImposterCount": false,
@@ -535,6 +536,7 @@
         { "name": "Player8" }
       ],
       "seed": -1,
+      "closedRoster": true,
       "minPlayers": 8,
       "imposterCount": 2,
       "autoImposterCount": false,
