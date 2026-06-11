@@ -1,6 +1,7 @@
 import
   std/[os, unittest],
   bitworld/spriteprotocol,
+  crewrift/replays,
   crewrift/sim
 
 const GameDir = currentSourcePath.parentDir.parentDir
@@ -131,6 +132,39 @@ suite "discrete button input":
     inputs[0].attack = true
     sim.stepInputs(inputs, prevInputs)
     check sim.deadCrewmates() == 2
+
+  test "kill events preserve simultaneous killer attribution":
+    var sim = initActionSim(4)
+    sim.players[1].role = Imposter
+    sim.players[1].killCooldown = 0
+    sim.placePlayer(0, 100, 100)
+    sim.placePlayer(2, 100, 100)
+    sim.placePlayer(1, 500, 500)
+    sim.placePlayer(3, 500, 500)
+
+    var
+      inputs = newSeq[InputState](sim.players.len)
+      prevInputs = inputs
+    inputs[0].attack = true
+    inputs[1].attack = true
+
+    sim.stepInputs(inputs, prevInputs)
+
+    check sim.simEvents.len == 2
+    check sim.simEvents[0].kind == SimKill
+    check sim.simEvents[0].actorSlot == sim.players[0].joinOrder
+    check sim.simEvents[0].targetSlot == sim.players[2].joinOrder
+    check sim.simEvents[1].kind == SimKill
+    check sim.simEvents[1].actorSlot == sim.players[1].joinOrder
+    check sim.simEvents[1].targetSlot == sim.players[3].joinOrder
+
+    let restored = deserializeReplaySim(serializeReplaySim(sim))
+    check restored.simEvents.len == 0
+
+    inputs[0].attack = false
+    inputs[1].attack = false
+    sim.stepInputs(inputs, prevInputs)
+    check sim.simEvents.len == 0
 
   test "vent only fires on a fresh B press":
     var sim = initActionSim(3)

@@ -229,8 +229,7 @@ proc syncPlayers(
   tasks: var seq[int],
   votes: var seq[int],
   rooms: var seq[int],
-  rewards: var seq[int],
-  killCooldowns: var seq[int]
+  rewards: var seq[int]
 ) =
   ## Adds tracking state for newly joined players.
   while alive.len < sim.players.len:
@@ -240,45 +239,39 @@ proc syncPlayers(
     votes.add(if i < sim.voteState.votes.len: sim.voteState.votes[i] else: -1)
     rooms.add(sim.roomAt(i))
     rewards.add(sim.players[i].reward)
-    killCooldowns.add(sim.players[i].killCooldown)
     events.addPlayerEvent(tick, PlayerJoined, sim, i)
     if rooms[i] >= 0:
       events.addRoomEvent(tick, EnteredRoom, sim, i, rooms[i])
-
-proc killerThisTick(sim: SimServer, killCooldowns: openArray[int]): int =
-  ## Returns the imposter whose kill cooldown just reset.
-  for i, player in sim.players:
-    if i < killCooldowns.len and player.role == Imposter and
-      killCooldowns[i] <= 0 and player.killCooldown > 0:
-      return i
-  -1
 
 proc printNewBodies(
   sim: SimServer,
   tick: int,
   events: var seq[ReplayEvent],
-  printed: var seq[string],
-  killCooldowns: openArray[int]
+  printed: var seq[string]
 ): seq[int] =
   ## Adds new body and kill events once.
   for body in sim.bodies:
     let key = body.bodyKey()
     if printed.hasKey(key):
       continue
-    let
-      victim = sim.playerForSlot(body.slotId)
-      killer = sim.killerThisTick(killCooldowns)
-    if killer >= 0 and victim >= 0:
-      events.add ReplayEvent(
-        tick: tick,
-        kind: Kill,
-        actorSlot: sim.playerSlot(killer),
-        actorLabel: sim.player(killer),
-        secondarySlot: sim.playerSlot(victim),
-        secondaryLabel: sim.player(victim),
-        task: -1,
-        phase: sim.phase
-      )
+    let victim = sim.playerForSlot(body.slotId)
+    for simEvent in sim.simEvents:
+      if simEvent.kind != SimKill or simEvent.tick != tick or
+          simEvent.targetSlot != body.slotId:
+        continue
+      let killer = sim.playerForSlot(simEvent.actorSlot)
+      if killer >= 0 and victim >= 0:
+        events.add ReplayEvent(
+          tick: tick,
+          kind: Kill,
+          actorSlot: simEvent.actorSlot,
+          actorLabel: sim.player(killer),
+          secondarySlot: simEvent.targetSlot,
+          secondaryLabel: sim.player(victim),
+          task: -1,
+          phase: sim.phase
+        )
+      break
     events.add ReplayEvent(
       tick: tick,
       kind: BodyFound,
@@ -347,16 +340,6 @@ proc addVoteCall(sim: SimServer, tick: int, events: var seq[ReplayEvent]) =
     )
   of VoteCalledUnknown:
     discard
-
-proc updatePlayerCounters(
-  sim: SimServer,
-  killCooldowns: var seq[int]
-) =
-  ## Copies player counters after a tick is printed.
-  for i, player in sim.players:
-    while killCooldowns.len <= i:
-      killCooldowns.add(player.killCooldown)
-    killCooldowns[i] = player.killCooldown
 
 proc printPlayerChanges(
   sim: SimServer,
@@ -710,7 +693,6 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
       votes: seq[int]
       rooms: seq[int]
       rewards: seq[int]
-      killCooldowns: seq[int]
       printedBodies: seq[string]
       done: seq[seq[bool]]
       chatCount = 0
@@ -752,14 +734,12 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
         tasks,
         votes,
         rooms,
-        rewards,
-        killCooldowns
+        rewards
       )
       let bodyVictims = sim.printNewBodies(
         tick,
         result.events,
-        printedBodies,
-        killCooldowns
+        printedBodies
       )
       for victim in bodyVictims:
         if victim < alive.len:
@@ -769,7 +749,6 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
       sim.printVotes(tick, result.events, votes)
       sim.printChats(tick, result.events, chatCount)
       sim.printScoreChanges(tick, result.events, rewards)
-      sim.updatePlayerCounters(killCooldowns)
   finally:
     setCurrentDir(previousDir)
 

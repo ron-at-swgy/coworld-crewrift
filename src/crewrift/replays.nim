@@ -90,7 +90,9 @@ proc replayGameConfig*(data: ReplayData): GameConfig =
 
 proc serializeReplaySim*(sim: SimServer): string =
   ## Serializes one simulation state for replay keyframes.
-  sim.toFlatty()
+  var snapshot = sim
+  snapshot.clearSimEvents()
+  snapshot.toFlatty()
 
 proc deserializeReplaySim*(bytes: string): SimServer =
   ## Deserializes one simulation state from a replay keyframe.
