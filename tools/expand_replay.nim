@@ -6,6 +6,14 @@ import
 type
   ExpandReplayError = object of CatchableError
 
+  OutputFormat = enum
+    TextFormat
+    JsonlFormat
+
+  ReplayCliConfig = object
+    replayPath: string
+    outputFormat: OutputFormat
+
   ReplayEventKind* = enum
     PlayerJoined
     EnteredRoom
@@ -46,7 +54,7 @@ type
     failTick*: int
 
 const
-  UsageText = "Usage: nim r tools/expand_replay.nim [replay-path]"
+  UsageText = "Usage: nim r tools/expand_replay.nim [--format text|jsonl] [replay-path]"
   GameDir = currentSourcePath().parentDir().parentDir()
   DefaultReplayPath = GameDir / "tests" / "replays" / "notsus.bitreplay"
 
@@ -54,24 +62,49 @@ proc fail(message: string) =
   ## Raises one replay expansion failure.
   raise newException(ExpandReplayError, message)
 
-proc replayPathFromArgs(): string {.used.} =
-  ## Returns the replay path passed on the command line.
+proc parseOutputFormat(value: string): OutputFormat =
+  ## Returns one requested output format.
+  case value
+  of "text":
+    result = TextFormat
+  of "jsonl":
+    result = JsonlFormat
+  else:
+    fail("Unknown format: " & value & "\n" & UsageText)
+
+proc cliConfigFromArgs(): ReplayCliConfig {.used.} =
+  ## Returns replay expansion configuration passed on the command line.
   var paths: seq[string]
-  for arg in commandLineParams():
+  var outputFormat = TextFormat
+  let args = commandLineParams()
+  var i = 0
+  while i < args.len:
+    let arg = args[i]
     if arg == "--":
       discard
     elif arg in ["--help", "-h"]:
       echo UsageText
       quit(0)
+    elif arg == "--format":
+      inc i
+      if i >= args.len:
+        fail("Missing value for --format.\n" & UsageText)
+      outputFormat = parseOutputFormat(args[i])
+    elif arg.startsWith("--format="):
+      outputFormat = parseOutputFormat(arg["--format=".len .. ^1])
     elif arg.startsWith("--"):
       fail("Unknown option: " & arg & "\n" & UsageText)
     else:
       paths.add(arg)
+    inc i
   if paths.len > 1:
     fail("Expected at most one replay path.\n" & UsageText)
-  if paths.len == 0:
-    return DefaultReplayPath
-  paths[0].absolutePath()
+  result.outputFormat = outputFormat
+  result.replayPath =
+    if paths.len == 0:
+      DefaultReplayPath
+    else:
+      paths[0].absolutePath()
 
 proc replayConfig(data: ReplayData): GameConfig =
   ## Returns the game config embedded in a replay.
@@ -740,14 +773,8 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
   finally:
     setCurrentDir(previousDir)
 
-proc expandReplay(path: string) {.used.} =
+proc printText(timeline: ReplayTimeline, path: string) =
   ## Prints one readable replay timeline.
-  if not fileExists(path):
-    fail("Replay file does not exist: " & path)
-
-  let data = loadReplay(path)
-  let timeline = expandReplayTimeline(data)
-
   echo "replay ", path
   for tick in 1 .. timeline.tickCount:
     echo "tick ", tick
@@ -758,9 +785,30 @@ proc expandReplay(path: string) {.used.} =
       fail("hash failed")
   echo "done"
 
+proc printJsonl(timeline: ReplayTimeline) =
+  ## Prints one machine-readable replay timeline.
+  for event in timeline.events:
+    echo $event.jsonRow()
+  if timeline.hashFailed:
+    fail("hash failed")
+
+proc expandReplay(config: ReplayCliConfig) {.used.} =
+  ## Prints one replay timeline.
+  let path = config.replayPath
+  if not fileExists(path):
+    fail("Replay file does not exist: " & path)
+
+  let data = loadReplay(path)
+  let timeline = expandReplayTimeline(data)
+  case config.outputFormat
+  of TextFormat:
+    printText(timeline, path)
+  of JsonlFormat:
+    printJsonl(timeline)
+
 when isMainModule:
   try:
-    expandReplay(replayPathFromArgs())
+    expandReplay(cliConfigFromArgs())
   except ExpandReplayError as e:
     if e.msg != "hash failed":
       stderr.writeLine("expand_replay failed: " & e.msg)
