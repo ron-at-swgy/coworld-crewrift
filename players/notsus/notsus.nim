@@ -412,16 +412,29 @@ proc gameDir(): string =
       return candidate
   sourceDir
 
+proc bitworldAtlasPath(rootDir: string): string =
+  ## Returns the BitWorld client atlas path near one workspace root.
+  rootDir / "bitworld" / "client" / "dist" / "atlas.png"
+
 proc atlasPath(): string =
   ## Returns the shared Silky atlas path.
-  let dir = gameDir()
+  let
+    dir = gameDir()
+    cwd = getCurrentDir()
   for candidate in [
+    clientDataDir() / "atlas.png",
+    bitworldAtlasPath(TrueCrewWorkspaceDir),
+    bitworldAtlasPath(CrewriftGameDir.parentDir()),
+    bitworldAtlasPath(dir.parentDir()),
+    bitworldAtlasPath(dir.parentDir().parentDir()),
+    bitworldAtlasPath(cwd.parentDir()),
+    bitworldAtlasPath(cwd.parentDir().parentDir()),
     dir / "dist" / "atlas.png",
     dir / ".." / "client" / "dist" / "atlas.png"
   ]:
     if fileExists(candidate):
       return candidate
-  dir / "dist" / "atlas.png"
+  bitworldAtlasPath(cwd.parentDir())
 
 proc sampleColor(index: uint8): ColorRGBX =
   ## Converts one palette index to a Silky color.
