@@ -6,6 +6,14 @@ import
 type
   ExpandReplayError = object of CatchableError
 
+  OutputFormat = enum
+    TextFormat
+    JsonlFormat
+
+  ReplayCliConfig = object
+    replayPath: string
+    outputFormat: OutputFormat
+
   ReplayEventKind* = enum
     PlayerJoined
     EnteredRoom
@@ -46,7 +54,7 @@ type
     failTick*: int
 
 const
-  UsageText = "Usage: nim r tools/expand_replay.nim [replay-path]"
+  UsageText = "Usage: nim r tools/expand_replay.nim [--format text|jsonl] [replay-path]"
   GameDir = currentSourcePath().parentDir().parentDir()
   DefaultReplayPath = GameDir / "tests" / "replays" / "notsus.bitreplay"
 
@@ -54,24 +62,49 @@ proc fail(message: string) =
   ## Raises one replay expansion failure.
   raise newException(ExpandReplayError, message)
 
-proc replayPathFromArgs(): string {.used.} =
-  ## Returns the replay path passed on the command line.
+proc parseOutputFormat(value: string): OutputFormat =
+  ## Returns one requested output format.
+  case value
+  of "text":
+    result = TextFormat
+  of "jsonl":
+    result = JsonlFormat
+  else:
+    fail("Unknown format: " & value & "\n" & UsageText)
+
+proc cliConfigFromArgs(): ReplayCliConfig {.used.} =
+  ## Returns replay expansion configuration passed on the command line.
   var paths: seq[string]
-  for arg in commandLineParams():
+  var outputFormat = TextFormat
+  let args = commandLineParams()
+  var i = 0
+  while i < args.len:
+    let arg = args[i]
     if arg == "--":
       discard
     elif arg in ["--help", "-h"]:
       echo UsageText
       quit(0)
+    elif arg == "--format":
+      inc i
+      if i >= args.len:
+        fail("Missing value for --format.\n" & UsageText)
+      outputFormat = parseOutputFormat(args[i])
+    elif arg.startsWith("--format="):
+      outputFormat = parseOutputFormat(arg["--format=".len .. ^1])
     elif arg.startsWith("--"):
       fail("Unknown option: " & arg & "\n" & UsageText)
     else:
       paths.add(arg)
+    inc i
   if paths.len > 1:
     fail("Expected at most one replay path.\n" & UsageText)
-  if paths.len == 0:
-    return DefaultReplayPath
-  paths[0].absolutePath()
+  result.outputFormat = outputFormat
+  result.replayPath =
+    if paths.len == 0:
+      DefaultReplayPath
+    else:
+      paths[0].absolutePath()
 
 proc replayConfig(data: ReplayData): GameConfig =
   ## Returns the game config embedded in a replay.
@@ -196,8 +229,7 @@ proc syncPlayers(
   tasks: var seq[int],
   votes: var seq[int],
   rooms: var seq[int],
-  rewards: var seq[int],
-  killCooldowns: var seq[int]
+  rewards: var seq[int]
 ) =
   ## Adds tracking state for newly joined players.
   while alive.len < sim.players.len:
@@ -207,45 +239,39 @@ proc syncPlayers(
     votes.add(if i < sim.voteState.votes.len: sim.voteState.votes[i] else: -1)
     rooms.add(sim.roomAt(i))
     rewards.add(sim.players[i].reward)
-    killCooldowns.add(sim.players[i].killCooldown)
     events.addPlayerEvent(tick, PlayerJoined, sim, i)
     if rooms[i] >= 0:
       events.addRoomEvent(tick, EnteredRoom, sim, i, rooms[i])
-
-proc killerThisTick(sim: SimServer, killCooldowns: openArray[int]): int =
-  ## Returns the imposter whose kill cooldown just reset.
-  for i, player in sim.players:
-    if i < killCooldowns.len and player.role == Imposter and
-      killCooldowns[i] <= 0 and player.killCooldown > 0:
-      return i
-  -1
 
 proc printNewBodies(
   sim: SimServer,
   tick: int,
   events: var seq[ReplayEvent],
-  printed: var seq[string],
-  killCooldowns: openArray[int]
+  printed: var seq[string]
 ): seq[int] =
   ## Adds new body and kill events once.
   for body in sim.bodies:
     let key = body.bodyKey()
     if printed.hasKey(key):
       continue
-    let
-      victim = sim.playerForSlot(body.slotId)
-      killer = sim.killerThisTick(killCooldowns)
-    if killer >= 0 and victim >= 0:
-      events.add ReplayEvent(
-        tick: tick,
-        kind: Kill,
-        actorSlot: sim.playerSlot(killer),
-        actorLabel: sim.player(killer),
-        secondarySlot: sim.playerSlot(victim),
-        secondaryLabel: sim.player(victim),
-        task: -1,
-        phase: sim.phase
-      )
+    let victim = sim.playerForSlot(body.slotId)
+    for simEvent in sim.simEvents:
+      if simEvent.kind != SimKill or simEvent.tick != tick or
+          simEvent.targetSlot != body.slotId:
+        continue
+      let killer = sim.playerForSlot(simEvent.actorSlot)
+      if killer >= 0 and victim >= 0:
+        events.add ReplayEvent(
+          tick: tick,
+          kind: Kill,
+          actorSlot: simEvent.actorSlot,
+          actorLabel: sim.player(killer),
+          secondarySlot: simEvent.targetSlot,
+          secondaryLabel: sim.player(victim),
+          task: -1,
+          phase: sim.phase
+        )
+      break
     events.add ReplayEvent(
       tick: tick,
       kind: BodyFound,
@@ -314,16 +340,6 @@ proc addVoteCall(sim: SimServer, tick: int, events: var seq[ReplayEvent]) =
     )
   of VoteCalledUnknown:
     discard
-
-proc updatePlayerCounters(
-  sim: SimServer,
-  killCooldowns: var seq[int]
-) =
-  ## Copies player counters after a tick is printed.
-  for i, player in sim.players:
-    while killCooldowns.len <= i:
-      killCooldowns.add(player.killCooldown)
-    killCooldowns[i] = player.killCooldown
 
 proc printPlayerChanges(
   sim: SimServer,
@@ -677,7 +693,6 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
       votes: seq[int]
       rooms: seq[int]
       rewards: seq[int]
-      killCooldowns: seq[int]
       printedBodies: seq[string]
       done: seq[seq[bool]]
       chatCount = 0
@@ -719,14 +734,12 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
         tasks,
         votes,
         rooms,
-        rewards,
-        killCooldowns
+        rewards
       )
       let bodyVictims = sim.printNewBodies(
         tick,
         result.events,
-        printedBodies,
-        killCooldowns
+        printedBodies
       )
       for victim in bodyVictims:
         if victim < alive.len:
@@ -736,18 +749,11 @@ proc expandReplayTimeline*(data: ReplayData): ReplayTimeline =
       sim.printVotes(tick, result.events, votes)
       sim.printChats(tick, result.events, chatCount)
       sim.printScoreChanges(tick, result.events, rewards)
-      sim.updatePlayerCounters(killCooldowns)
   finally:
     setCurrentDir(previousDir)
 
-proc expandReplay(path: string) {.used.} =
+proc printText(timeline: ReplayTimeline, path: string) =
   ## Prints one readable replay timeline.
-  if not fileExists(path):
-    fail("Replay file does not exist: " & path)
-
-  let data = loadReplay(path)
-  let timeline = expandReplayTimeline(data)
-
   echo "replay ", path
   for tick in 1 .. timeline.tickCount:
     echo "tick ", tick
@@ -758,9 +764,30 @@ proc expandReplay(path: string) {.used.} =
       fail("hash failed")
   echo "done"
 
+proc printJsonl(timeline: ReplayTimeline) =
+  ## Prints one machine-readable replay timeline.
+  for event in timeline.events:
+    echo $event.jsonRow()
+  if timeline.hashFailed:
+    fail("hash failed")
+
+proc expandReplay(config: ReplayCliConfig) {.used.} =
+  ## Prints one replay timeline.
+  let path = config.replayPath
+  if not fileExists(path):
+    fail("Replay file does not exist: " & path)
+
+  let data = loadReplay(path)
+  let timeline = expandReplayTimeline(data)
+  case config.outputFormat
+  of TextFormat:
+    printText(timeline, path)
+  of JsonlFormat:
+    printJsonl(timeline)
+
 when isMainModule:
   try:
-    expandReplay(replayPathFromArgs())
+    expandReplay(cliConfigFromArgs())
   except ExpandReplayError as e:
     if e.msg != "hash failed":
       stderr.writeLine("expand_replay failed: " & e.msg)

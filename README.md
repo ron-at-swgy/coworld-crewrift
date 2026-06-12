@@ -207,6 +207,12 @@ Run it from the repo root with a replay path:
 nim r tools/expand_replay.nim tests/replays/notsus.bitreplay
 ```
 
+For machine-readable rows, emit one JSON event per line:
+
+```sh
+nim r tools/expand_replay.nim --format jsonl tests/replays/notsus.bitreplay
+```
+
 For tournament episodes, first find the completed round where your policy
 played badly, then download the replays you can access:
 
