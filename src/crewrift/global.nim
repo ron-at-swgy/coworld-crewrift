@@ -107,6 +107,8 @@ const
   SpritePlayerVoteProgressObjectId = 10002
   SpritePlayerVoteChatBgObjectId = 10003
   SpritePlayerKillProgressObjectId = 10004
+  SpritePlayerDebugCenterSpriteId = 5018
+  SpritePlayerDebugCenterObjectId = 10005
   SpritePlayerVoteDotObjectBase = 10100
   SpritePlayerVoteSkipDotObjectBase = 10400
   SpritePlayerTaskArrowObjectBase = 7000
@@ -2214,6 +2216,14 @@ proc buildSpriteProtocolPlayerInit(
     buildSolidSprite(1, 1, 8'u8),
     "task arrow"
   )
+  result.addSpriteChanged(
+    spriteDefs,
+    SpritePlayerDebugCenterSpriteId.protocolSpriteId(spriteIdOffset),
+    1,
+    1,
+    buildSolidSprite(1, 1, 2'u8),
+    "debug center"
+  )
   sim.addSpriteProtocolInterstitialSprites(spriteDefs, result, spriteIdOffset)
   for i in 0 ..< PlayerColors.len:
     for variant in 0 ..< CrewSpriteVariants:
@@ -2971,6 +2981,18 @@ proc buildSpriteProtocolPlayerUpdates*(
         objectIdOffset,
         spriteIdOffset
       )
+
+    currentIds.addProtocolObject(
+      result,
+      SpritePlayerDebugCenterObjectId,
+      player.x - cameraX,
+      player.y - cameraY,
+      high(int16).int,
+      layerId,
+      SpritePlayerDebugCenterSpriteId,
+      objectIdOffset,
+      spriteIdOffset
+    )
 
     if player.role == Crewmate:
       let bob = [0, 0, -1, -1, -1, 0, 0, 1, 1, 1]
