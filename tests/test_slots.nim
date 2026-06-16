@@ -91,6 +91,15 @@ suite "player slots":
     check replay.playing
     check replay.looping
 
+  test "finite server waits through final game over screen":
+    var config = defaultGameConfig()
+    config.maxGames = 1
+
+    check not config.finalGameQuitReady(0, Playing, 0)
+    check not config.finalGameQuitReady(1, GameOver, 2)
+    check config.finalGameQuitReady(1, GameOver, 1)
+    check config.finalGameQuitReady(1, Lobby, 0)
+
   test "config parses example slots and tokens":
     var config = defaultGameConfig()
     config.update(ExampleSlotsJson)

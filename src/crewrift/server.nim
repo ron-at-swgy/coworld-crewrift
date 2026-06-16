@@ -69,6 +69,16 @@ proc liveSpeedIndex(config: GameConfig): int =
       return i
   0
 
+proc finalGameQuitReady*(
+  config: GameConfig,
+  gamesPlayed: int,
+  phase: GamePhase,
+  gameOverTimer: int
+): bool =
+  ## Returns true when a finite run has shown the final game-over screen.
+  config.maxGames > 0 and gamesPlayed >= config.maxGames and
+    (phase != GameOver or gameOverTimer <= 1)
+
 proc isWebSocketUpgrade(request: Request): bool =
   ## Returns true when the GET request is a websocket upgrade.
   request.headers["Sec-WebSocket-Key"].len > 0
@@ -925,7 +935,7 @@ proc runServerLoop*(
               "finite match roster dropped below minPlayers before roles were assigned"
             )
           sim.finishGame(Crewmate, timeLimitReached = true)
-          quitAfterFrame = true
+          gamesPlayed = max(gamesPlayed, config.maxGames)
         elif not replayLoaded and sim.phase != Lobby and sim.players.len == 0:
           sim.resetToLobby()
           prevInputs = @[]
@@ -1180,6 +1190,13 @@ proc runServerLoop*(
         stepPressedInputMasks = pressedInputMasks
         lastStepInputs = prevInputs
       for _ in 0 ..< playbackSpeed(liveSpeedIndex):
+        if config.finalGameQuitReady(
+          gamesPlayed,
+          sim.phase,
+          sim.gameOverTimer
+        ):
+          quitAfterFrame = true
+          break
         let phaseBeforeStep = sim.phase
         stepPrevInputs.clearPressedInputMasks(stepPressedInputMasks)
         sim.step(stepInputs, stepPrevInputs)
@@ -1198,9 +1215,6 @@ proc runServerLoop*(
         if config.maxGames > 0 and phaseBeforeStep != GameOver and
             sim.phase == GameOver:
           inc gamesPlayed
-        if config.maxGames > 0 and gamesPlayed >= config.maxGames:
-          quitAfterFrame = true
-          break
         if sim.needsReregister:
           break
       prevInputs = lastStepInputs
