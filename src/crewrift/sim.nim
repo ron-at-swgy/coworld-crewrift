@@ -28,8 +28,8 @@ const
   VoteSkipCursorH* = 8
   CollisionW* = 1
   CollisionH* = 1
-  SpriteDrawOffX* = 2
-  SpriteDrawOffY* = 8
+  SpriteDrawOffX* = 8
+  SpriteDrawOffY* = 12
   MotionScale* = 256
   Accel* = 76
   FrictionNum* = 144
@@ -84,9 +84,9 @@ const
   RandomSeedMod = int(high(int32))
   ScreenPixelCount = ScreenWidth * ScreenHeight
   ShadowOriginSx =
-    ScreenWidth div 2 + SpriteDrawOffX + CollisionW div 2 - SpriteSize div 2
+    ScreenWidth div 2 + CollisionW div 2
   ShadowOriginSy =
-    ScreenHeight div 2 + SpriteDrawOffY + CollisionH div 2 - SpriteSize div 2
+    ScreenHeight div 2 + CollisionH div 2
   TextColor* = 2'u8
   TextLineHeight* = 7
   TaskReward* = 1
@@ -3274,10 +3274,8 @@ proc playerView*(sim: SimServer, playerIndex: int): PlayerView =
   ## Returns the canonical per-player camera and visibility origin.
   let
     player = sim.players[playerIndex]
-    spriteX = player.x - SpriteDrawOffX
-    spriteY = player.y - SpriteDrawOffY
-    centerX = spriteX + SpriteSize div 2
-    centerY = spriteY + SpriteSize div 2
+    centerX = player.x
+    centerY = player.y
   result.cameraX = centerX - ScreenWidth div 2
   result.cameraY = centerY - ScreenHeight div 2
   result.originMx = player.x + CollisionW div 2

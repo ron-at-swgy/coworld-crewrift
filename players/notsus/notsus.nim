@@ -23,8 +23,8 @@ const
   ReconnectAttemptMs = 1_000
   PlayerScreenX = ScreenWidth div 2
   PlayerScreenY = ScreenHeight div 2
-  PlayerWorldOffX = SpriteDrawOffX + PlayerScreenX - SpriteSize div 2
-  PlayerWorldOffY = SpriteDrawOffY + PlayerScreenY - SpriteSize div 2
+  PlayerWorldOffX = PlayerScreenX
+  PlayerWorldOffY = PlayerScreenY
   FullFrameFitMaxErrors = 420
   LocalFrameFitMaxErrors = 320
   FrameFitMinCompared = 12000
