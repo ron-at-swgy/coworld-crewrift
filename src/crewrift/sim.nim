@@ -47,7 +47,7 @@ const
   ShadeTintColor* = 9'u8
   OutlineColor* = 0'u8
   KillRange* = 20
-  KillCooldownTicks* = 1000
+  KillCooldownTicks* = 800
   ButtonResetsKillCooldowns* = false
   GameInfoTicks* = 3 * TargetFps
   RoleRevealTicks* = 120

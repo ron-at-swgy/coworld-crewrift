@@ -18,9 +18,9 @@ suite "max ticks":
   test "default vote timer is fifty seconds":
     check defaultGameConfig().voteTimerTicks == TargetFps * 50
 
-  test "default kill cooldown is one thousand ticks":
-    check KillCooldownTicks == 1000
-    check defaultGameConfig().killCooldownTicks == 1000
+  test "default kill cooldown is eight hundred ticks":
+    check KillCooldownTicks == 800
+    check defaultGameConfig().killCooldownTicks == 800
 
   test "button cooldown reset defaults off":
     check not ButtonResetsKillCooldowns

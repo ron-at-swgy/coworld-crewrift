@@ -173,7 +173,7 @@
           "description": "Kill cooldown duration in ticks.",
           "type": "integer",
           "minimum": 0,
-          "default": 1000
+          "default": 800
         },
         "buttonResetsKillCooldowns": {
           "description": "Whether emergency button meetings reset kill cooldowns.",
@@ -500,7 +500,7 @@
         "voteTimerTicks": 1200,
         "connectTimeoutTicks": 2880,
         "disconnectTimeoutTicks": 720,
-        "killCooldownTicks": 1000,
+        "killCooldownTicks": 800,
         "buttonResetsKillCooldowns": false,
         "fastMode": true,
         "showTaskArrows": true,
@@ -562,7 +562,7 @@
       "voteTimerTicks": 120,
       "connectTimeoutTicks": 2880,
       "disconnectTimeoutTicks": 720,
-      "killCooldownTicks": 1000,
+      "killCooldownTicks": 800,
       "buttonResetsKillCooldowns": false,
       "fastMode": true,
       "showTaskArrows": false,

@@ -1,6 +1,6 @@
 {
   "maxGames":1,
-  "killCooldownTicks":100,
+  "killCooldownTicks":800,
   "tokens":[
     "0xBADA55_0",
     "0xBADA55_1",
