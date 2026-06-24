@@ -100,7 +100,7 @@
         "fastMode": {
           "description": "Advance frames early when all players report ready.",
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "seed": {
           "description": "Random seed. Use -1 to pick a time-based seed.",
@@ -173,7 +173,12 @@
           "description": "Kill cooldown duration in ticks.",
           "type": "integer",
           "minimum": 0,
-          "default": 500
+          "default": 1000
+        },
+        "buttonResetsKillCooldowns": {
+          "description": "Whether emergency button meetings reset kill cooldowns.",
+          "type": "boolean",
+          "default": false
         },
         "roleRevealTicks": {
           "description": "Role reveal duration in ticks.",
@@ -495,8 +500,9 @@
         "voteTimerTicks": 1200,
         "connectTimeoutTicks": 2880,
         "disconnectTimeoutTicks": 720,
-        "killCooldownTicks": 500,
-        "fastMode": false,
+        "killCooldownTicks": 1000,
+        "buttonResetsKillCooldowns": false,
+        "fastMode": true,
         "showTaskArrows": true,
         "showTaskBubbles": true,
         "showPlayerLabels": true
@@ -556,8 +562,9 @@
       "voteTimerTicks": 120,
       "connectTimeoutTicks": 2880,
       "disconnectTimeoutTicks": 720,
-      "killCooldownTicks": 500,
-      "fastMode": false,
+      "killCooldownTicks": 1000,
+      "buttonResetsKillCooldowns": false,
+      "fastMode": true,
       "showTaskArrows": false,
       "showTaskBubbles": false,
       "showPlayerLabels": true

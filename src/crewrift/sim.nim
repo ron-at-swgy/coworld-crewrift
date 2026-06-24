@@ -47,7 +47,8 @@ const
   ShadeTintColor* = 9'u8
   OutlineColor* = 0'u8
   KillRange* = 20
-  KillCooldownTicks* = 500
+  KillCooldownTicks* = 1000
+  ButtonResetsKillCooldowns* = false
   GameInfoTicks* = 3 * TargetFps
   RoleRevealTicks* = 120
   TaskCompleteTicks* = 72
@@ -307,6 +308,7 @@ type
     fastMode*: bool
     killRange*: int
     killCooldownTicks*: int
+    buttonResetsKillCooldowns*: bool
     gameInfoTicks*: int
     roleRevealTicks*: int
     taskCompleteTicks*: int
@@ -1052,9 +1054,10 @@ proc defaultGameConfig*(): GameConfig =
     stopThreshold: StopThreshold,
     seed: RandomSeedSentinel,
     speed: 1,
-    fastMode: false,
+    fastMode: true,
     killRange: KillRange,
     killCooldownTicks: KillCooldownTicks,
+    buttonResetsKillCooldowns: ButtonResetsKillCooldowns,
     gameInfoTicks: GameInfoTicks,
     roleRevealTicks: RoleRevealTicks,
     taskCompleteTicks: TaskCompleteTicks,
@@ -1408,6 +1411,10 @@ proc update*(config: var GameConfig, jsonText: string) =
   node.readConfigBool("fastMode", config.fastMode)
   node.readConfigInt("killRange", config.killRange)
   node.readConfigInt("killCooldownTicks", config.killCooldownTicks)
+  node.readConfigBool(
+    "buttonResetsKillCooldowns",
+    config.buttonResetsKillCooldowns
+  )
   node.readConfigInt("gameInfoTicks", config.gameInfoTicks)
   node.readConfigInt("roleRevealTicks", config.roleRevealTicks)
   node.readConfigInt("taskCompleteTicks", config.taskCompleteTicks)
@@ -1505,6 +1512,7 @@ proc configJson*(config: GameConfig): string =
     "fastMode": config.fastMode,
     "killRange": config.killRange,
     "killCooldownTicks": config.killCooldownTicks,
+    "buttonResetsKillCooldowns": config.buttonResetsKillCooldowns,
     "gameInfoTicks": config.gameInfoTicks,
     "roleRevealTicks": config.roleRevealTicks,
     "taskCompleteTicks": config.taskCompleteTicks,
@@ -3534,16 +3542,28 @@ proc tallyVotes*(sim: var SimServer, timedOut = false) =
   sim.voteState.finalizeTimer = 0
   sim.voteState.resultTimer = sim.config.voteResultTicks
 
+proc voteResultResetsKillCooldowns(sim: SimServer): bool =
+  ## Returns whether this vote result resets impostor kill cooldowns.
+  case sim.voteState.callKind
+  of VoteCalledButton:
+    sim.config.buttonResetsKillCooldowns
+  of VoteCalledBody, VoteCalledUnknown:
+    true
+
 proc applyVoteResult*(sim: var SimServer) =
+  ## Applies one completed vote result to player and game state.
   let ej = sim.voteState.ejectedPlayer
   if ej >= 0 and ej < sim.players.len:
     sim.players[ej].alive = false
   sim.bodies.setLen(0)
   sim.chatMessages.setLen(0)
   sim.voteState.callTimer = 0
+  let resetKillCooldowns = sim.voteResultResetsKillCooldowns()
   for i in 0 ..< sim.players.len:
     sim.resetPlayerToHome(i)
-    if sim.players[i].alive and sim.players[i].role == Imposter:
+    if resetKillCooldowns and
+        sim.players[i].alive and
+        sim.players[i].role == Imposter:
       sim.players[i].killCooldown = sim.config.killCooldownTicks
   sim.phase = Playing
 
