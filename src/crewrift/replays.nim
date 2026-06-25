@@ -75,21 +75,23 @@ proc loadReplay*(path: string): ReplayData =
   ## Loads a replay file into memory.
   replayCodec.loadReplay(path, CrewriftReplaySpec)
 
-proc replayConfigHasGameInfoTicks(configJson: string): bool =
-  ## Returns true when replay JSON stores the game-info timer field.
+proc replayConfigHasField(configJson, field: string): bool =
+  ## Returns true when replay JSON stores one config field.
   if configJson.len == 0:
     return false
   try:
     let node = parseJson(configJson)
-    node.kind == JObject and node.hasKey("gameInfoTicks")
+    node.kind == JObject and node.hasKey(field)
   except JsonParsingError:
     false
 
 proc replayGameConfig*(data: ReplayData): GameConfig =
   ## Builds playback config while preserving legacy replay timing.
   result = defaultGameConfig()
-  if not data.configJson.replayConfigHasGameInfoTicks():
+  if not data.configJson.replayConfigHasField("gameInfoTicks"):
     result.gameInfoTicks = 0
+  if not data.configJson.replayConfigHasField("buttonResetsKillCooldowns"):
+    result.buttonResetsKillCooldowns = true
   result.update(data.configJson)
 
 proc serializeReplaySim*(sim: SimServer): string =

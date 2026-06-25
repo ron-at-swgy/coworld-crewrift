@@ -29,7 +29,7 @@ proc advanceMeetingCall(sim: var SimServer) =
     prevInputs = inputs
 
 suite "vote cooldown":
-  test "vote result resets imposter cooldown":
+  test "button vote preserves imposter cooldown by default":
     var config = defaultGameConfig()
     config.minPlayers = 3
     config.imposterCount = 1
@@ -43,7 +43,57 @@ suite "vote cooldown":
     sim.players[imposter].role = Imposter
 
     sim.players[imposter].killCooldown = 17
-    sim.startVote()
+    sim.startVote(VoteCalledButton, 1)
+    sim.advanceMeetingCall()
+    sim.voteState.ejectedPlayer = -1
+    sim.applyVoteResult()
+
+    check sim.phase == Playing
+    check sim.players[imposter].killCooldown == 17
+
+  test "button vote resets imposter cooldown when enabled":
+    var config = defaultGameConfig()
+    config.minPlayers = 3
+    config.imposterCount = 1
+    config.autoImposterCount = false
+    config.killCooldownTicks = 1200
+    config.buttonResetsKillCooldowns = true
+    config.tasksPerPlayer = 1
+
+    var sim = initCrewriftForTest(config)
+    sim.addPlayers(3)
+    let imposter = 0
+    sim.players[imposter].role = Imposter
+
+    sim.players[imposter].killCooldown = 17
+    sim.startVote(VoteCalledButton, 1)
+    sim.advanceMeetingCall()
+    sim.voteState.ejectedPlayer = -1
+    sim.applyVoteResult()
+
+    check sim.phase == Playing
+    check sim.players[imposter].killCooldown == config.killCooldownTicks
+
+  test "body vote resets imposter cooldown":
+    var config = defaultGameConfig()
+    config.minPlayers = 3
+    config.imposterCount = 1
+    config.autoImposterCount = false
+    config.killCooldownTicks = 1200
+    config.tasksPerPlayer = 1
+
+    var sim = initCrewriftForTest(config)
+    sim.addPlayers(3)
+    let imposter = 0
+    sim.players[imposter].role = Imposter
+
+    sim.players[imposter].killCooldown = 17
+    sim.startVote(
+      VoteCalledBody,
+      1,
+      sim.players[2].color,
+      sim.players[2].joinOrder
+    )
     sim.advanceMeetingCall()
     sim.voteState.ejectedPlayer = -1
     sim.applyVoteResult()

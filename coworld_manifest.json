@@ -24,7 +24,7 @@
           "description": "One connection token per player slot, indexed by slot.",
           "type": "array",
           "minItems": 8,
-          "maxItems": 8,
+          "maxItems": 16,
           "items": {
             "type": "string",
             "minLength": 1
@@ -34,7 +34,7 @@
           "description": "One player display-name object per player slot, indexed by slot.",
           "type": "array",
           "minItems": 8,
-          "maxItems": 8,
+          "maxItems": 16,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -72,21 +72,21 @@
                 "type": "string",
                 "enum": [
                   "red",
+                  "blue",
+                  "green",
+                  "pink",
                   "orange",
                   "yellow",
-                  "light blue",
-                  "pink",
+                  "purple",
+                  "cyan",
                   "lime",
-                  "blue",
-                  "pale blue",
-                  "gray",
-                  "white",
-                  "dark brown",
                   "brown",
-                  "dark teal",
-                  "green",
-                  "dark navy",
-                  "black"
+                  "beige",
+                  "navy",
+                  "teal",
+                  "rose",
+                  "maroon",
+                  "gray"
                 ]
               }
             }
@@ -100,7 +100,7 @@
         "fastMode": {
           "description": "Advance frames early when all players report ready.",
           "type": "boolean",
-          "default": false
+          "default": true
         },
         "seed": {
           "description": "Random seed. Use -1 to pick a time-based seed.",
@@ -173,7 +173,12 @@
           "description": "Kill cooldown duration in ticks.",
           "type": "integer",
           "minimum": 0,
-          "default": 500
+          "default": 800
+        },
+        "buttonResetsKillCooldowns": {
+          "description": "Whether emergency button meetings reset kill cooldowns.",
+          "type": "boolean",
+          "default": false
         },
         "roleRevealTicks": {
           "description": "Role reveal duration in ticks.",
@@ -429,7 +434,8 @@
       "description": "Sprite-protocol Crewrift bot used for local smoke episodes.",
       "image": "{{PLAYER_IMAGE}}",
       "run": [
-        "/bin/notsus"
+        "/bin/notsus",
+        "--exit-on-disconnect"
       ],
       "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/master/players/notsus"
     }
@@ -442,16 +448,6 @@
       "description": "Social-deduction commissioner shared with Among Them. It schedules seat-rotated episodes, computes rankings, and supports promotion-style leagues for Crewrift Daily.",
       "source_url": "https://github.com/Metta-AI/commissioners/tree/main/commissioners/ruleset_strategy_commissioner",
       "image": "ghcr.io/metta-ai/commissioners-among-them-commissioner:latest"
-    }
-  ],
-  "reporter": [
-    {
-      "id": "crewrift-eventlog-reporter",
-      "name": "Crewrift Event-Log Reporter",
-      "type": "reporter",
-      "description": "Expands a completed Crewrift episode replay into a structured categorical event log: {ts, player, key, value} JSON rows served over the reporter WebSocket contract.",
-      "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/master/reporters/eventlog",
-      "image": "ghcr.io/metta-ai/reporters-crewrift-eventlog:latest"
     }
   ],
   "grader": [
@@ -480,6 +476,16 @@
           { "name": "Player7" },
           { "name": "Player8" }
         ],
+        "slots": [
+          { "color": "red" },
+          { "color": "blue" },
+          { "color": "green" },
+          { "color": "pink" },
+          { "color": "orange" },
+          { "color": "yellow" },
+          { "color": "purple" },
+          { "color": "cyan" }
+        ],
         "seed": -1,
         "closedRoster": true,
         "minPlayers": 8,
@@ -495,8 +501,9 @@
         "voteTimerTicks": 1200,
         "connectTimeoutTicks": 2880,
         "disconnectTimeoutTicks": 720,
-        "killCooldownTicks": 500,
-        "fastMode": false,
+        "killCooldownTicks": 800,
+        "buttonResetsKillCooldowns": false,
+        "fastMode": true,
         "showTaskArrows": true,
         "showTaskBubbles": true,
         "showPlayerLabels": true
@@ -541,6 +548,16 @@
         { "name": "Player7" },
         { "name": "Player8" }
       ],
+      "slots": [
+        { "color": "red" },
+        { "color": "blue" },
+        { "color": "green" },
+        { "color": "pink" },
+        { "color": "orange" },
+        { "color": "yellow" },
+        { "color": "purple" },
+        { "color": "cyan" }
+      ],
       "seed": -1,
       "closedRoster": true,
       "minPlayers": 8,
@@ -556,8 +573,9 @@
       "voteTimerTicks": 120,
       "connectTimeoutTicks": 2880,
       "disconnectTimeoutTicks": 720,
-      "killCooldownTicks": 500,
-      "fastMode": false,
+      "killCooldownTicks": 800,
+      "buttonResetsKillCooldowns": false,
+      "fastMode": true,
       "showTaskArrows": false,
       "showTaskBubbles": false,
       "showPlayerLabels": true

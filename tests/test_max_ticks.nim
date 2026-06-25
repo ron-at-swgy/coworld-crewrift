@@ -18,9 +18,16 @@ suite "max ticks":
   test "default vote timer is fifty seconds":
     check defaultGameConfig().voteTimerTicks == TargetFps * 50
 
-  test "default kill cooldown is five hundred ticks":
-    check KillCooldownTicks == 500
-    check defaultGameConfig().killCooldownTicks == 500
+  test "default kill cooldown is eight hundred ticks":
+    check KillCooldownTicks == 800
+    check defaultGameConfig().killCooldownTicks == 800
+
+  test "button cooldown reset defaults off":
+    check not ButtonResetsKillCooldowns
+    check not defaultGameConfig().buttonResetsKillCooldowns
+
+  test "fast mode defaults on":
+    check defaultGameConfig().fastMode
 
   test "default connection timeouts are split":
     check ConnectTimeoutTicks == TargetFps * 120
@@ -55,15 +62,18 @@ suite "max ticks":
     var config = defaultGameConfig()
     config.maxTicks = 123
     config.fastMode = true
+    config.buttonResetsKillCooldowns = true
 
     let serialized = parseJson(config.configJson())
     check serialized["maxTicks"].getInt() == 123
     check serialized["fastMode"].getBool()
+    check serialized["buttonResetsKillCooldowns"].getBool()
 
     var roundTrip = defaultGameConfig()
     roundTrip.update($serialized)
     check roundTrip.maxTicks == 123
     check roundTrip.fastMode
+    check roundTrip.buttonResetsKillCooldowns
 
   test "starts at game start":
     var config = defaultGameConfig()
