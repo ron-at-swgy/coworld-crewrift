@@ -8,7 +8,9 @@
     "runnable": {
       "type": "game",
       "image": "{{GAME_IMAGE}}",
-      "run": ["/bin/crewrift"],
+      "run": [
+        "/bin/crewrift"
+      ],
       "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/1cbd4de4eba3905bb46783acabb39150d3ad1b45"
     },
     "config_schema": {
@@ -446,8 +448,8 @@
       "name": "Crewrift Social Deduction Commissioner",
       "type": "commissioner",
       "description": "Social-deduction commissioner shared with Among Them. It schedules seat-rotated episodes, computes rankings, and supports promotion-style leagues for Crewrift Daily.",
-      "source_url": "https://github.com/Metta-AI/coworld-tools/tree/e6b7863c2619d260bb29f14364baf09c578c9f30/commissioners/commissioners/ruleset_strategy_commissioner",
-      "image": "ghcr.io/metta-ai/commissioners-among-them-commissioner:latest"
+      "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/master/commissioner/commissioners/ruleset_strategy_commissioner",
+      "image": "coworld-crewrift-commissioner:latest"
     }
   ],
   "grader": [
@@ -456,8 +458,8 @@
       "name": "Crewrift Grader",
       "type": "grader",
       "description": "Reference Crewrift grader that scores social-deduction episodes from wins, score spread, tasks, kills, and voting activity.",
-      "source_url": "https://github.com/Metta-AI/coworld-tools/tree/e6b7863c2619d260bb29f14364baf09c578c9f30/graders/graders/crewrift/crewrift_grader",
-      "image": "ghcr.io/metta-ai/graders-crewrift:latest"
+      "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/master/grader/graders/crewrift/crewrift_grader",
+      "image": "coworld-crewrift-grader:latest"
     }
   ],
   "variants": [
@@ -467,24 +469,56 @@
       "description": "Eight-player Crewrift tournament episode using the default balanced game settings.",
       "game_config": {
         "players": [
-          { "name": "Player1" },
-          { "name": "Player2" },
-          { "name": "Player3" },
-          { "name": "Player4" },
-          { "name": "Player5" },
-          { "name": "Player6" },
-          { "name": "Player7" },
-          { "name": "Player8" }
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          },
+          {
+            "name": "Player5"
+          },
+          {
+            "name": "Player6"
+          },
+          {
+            "name": "Player7"
+          },
+          {
+            "name": "Player8"
+          }
         ],
         "slots": [
-          { "color": "red" },
-          { "color": "blue" },
-          { "color": "green" },
-          { "color": "pink" },
-          { "color": "orange" },
-          { "color": "yellow" },
-          { "color": "purple" },
-          { "color": "cyan" }
+          {
+            "color": "red"
+          },
+          {
+            "color": "blue"
+          },
+          {
+            "color": "green"
+          },
+          {
+            "color": "pink"
+          },
+          {
+            "color": "orange"
+          },
+          {
+            "color": "yellow"
+          },
+          {
+            "color": "purple"
+          },
+          {
+            "color": "cyan"
+          }
         ],
         "seed": -1,
         "closedRoster": true,
@@ -539,24 +573,56 @@
     ],
     "game_config": {
       "players": [
-        { "name": "Player1" },
-        { "name": "Player2" },
-        { "name": "Player3" },
-        { "name": "Player4" },
-        { "name": "Player5" },
-        { "name": "Player6" },
-        { "name": "Player7" },
-        { "name": "Player8" }
+        {
+          "name": "Player1"
+        },
+        {
+          "name": "Player2"
+        },
+        {
+          "name": "Player3"
+        },
+        {
+          "name": "Player4"
+        },
+        {
+          "name": "Player5"
+        },
+        {
+          "name": "Player6"
+        },
+        {
+          "name": "Player7"
+        },
+        {
+          "name": "Player8"
+        }
       ],
       "slots": [
-        { "color": "red" },
-        { "color": "blue" },
-        { "color": "green" },
-        { "color": "pink" },
-        { "color": "orange" },
-        { "color": "yellow" },
-        { "color": "purple" },
-        { "color": "cyan" }
+        {
+          "color": "red"
+        },
+        {
+          "color": "blue"
+        },
+        {
+          "color": "green"
+        },
+        {
+          "color": "pink"
+        },
+        {
+          "color": "orange"
+        },
+        {
+          "color": "yellow"
+        },
+        {
+          "color": "purple"
+        },
+        {
+          "color": "cyan"
+        }
       ],
       "seed": -1,
       "closedRoster": true,
