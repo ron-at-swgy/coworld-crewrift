@@ -434,7 +434,8 @@
       "description": "Sprite-protocol Crewrift bot used for local smoke episodes.",
       "image": "{{PLAYER_IMAGE}}",
       "run": [
-        "/bin/notsus"
+        "/bin/notsus",
+        "--exit-on-disconnect"
       ],
       "source_url": "https://github.com/Metta-AI/coworld-crewrift/tree/master/players/notsus"
     }
