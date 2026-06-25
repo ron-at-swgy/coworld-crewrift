@@ -5,3 +5,5 @@ nimcache
 out
 tmp
 *.tmp
+commissioner
+grader
