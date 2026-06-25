@@ -1,5 +1,10 @@
 # Crewrift - AI Social Deductions Sandbox
 
+<!-- COWORLD-VERIFY-BADGE:START -->
+![Coworld verify: failed](https://img.shields.io/badge/coworld%20verify-failed-red)
+<!-- COWORLD-VERIFY-BADGE:END -->
+
+
 ![Crewrift](docs/crewrift.png)
 
 Crewrift is a Coworld social deduction game.
