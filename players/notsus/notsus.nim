@@ -6061,6 +6061,13 @@ when isMainModule and not defined(italkalotLibrary):
               "Option --gui does not take a value."
             )
           result.gui = true
+        of "exit-on-disconnect":
+          if val.len > 0:
+            raise newException(
+              ValueError,
+              "Option --exit-on-disconnect does not take a value."
+            )
+          result.exitOnDisconnect = true
         else:
           raise newException(ValueError, "Unknown option: --" & key)
       of cmdShortOption:
@@ -6071,7 +6078,6 @@ when isMainModule and not defined(italkalotLibrary):
         discard
     if not urlSet and (addressSet or portSet):
       result.url = ""
-    result.exitOnDisconnect = false
 
   let config = readBotRunConfig()
   let target =
