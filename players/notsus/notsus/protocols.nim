@@ -62,6 +62,7 @@ type
     unpacked*: seq[uint8]
     packetBytes: seq[uint8]
     objectIds: seq[int]
+    votingFramePending: bool
 
 proc initSpriteState(): SpriteState =
   ## Builds the initial sprite protocol state.
@@ -90,6 +91,7 @@ proc reset*(client: ProtocolClient) =
   client.walkabilityWidth = 0
   client.walkabilityHeight = 0
   client.walkabilityMask.setLen(0)
+  client.votingFramePending = false
 
 proc tickLabelValue*(label: string): int =
   ## Returns the tick count encoded in a sprite tick label.
@@ -125,6 +127,16 @@ proc gameInfoLabel*(label: string): bool =
     label.parseLabelInt("VOTE TIMER ", "T") >= 0 or
     label.parseLabelInt("GAME TIMER ", "T") >= 0 or
     label == "GAME TIMER NONE"
+
+proc votingFrameLabel(label: string): bool =
+  ## Returns true when a sprite label belongs to the voting screen.
+  label == "SKIP" or
+    label == "vote cursor" or
+    label == "vote skip cursor" or
+    label.startsWith("vote self marker ") or
+    label.startsWith("vote dot ") or
+    label == "vote timer" or
+    label == "vote chat background"
 
 proc queryEscape*(value: string): string =
   ## Escapes a small string for use in a websocket query parameter.
@@ -420,6 +432,8 @@ proc applySpritePacket*(
       case message.kind
       of spkSprite:
         let sprite = message.sprite
+        if sprite.label.votingFrameLabel():
+          client.votingFramePending = true
         let
           shouldDecodeWalkability = sprite.label == "walkability map"
           shouldDecodePixels = decodePixels
@@ -470,6 +484,9 @@ proc applySpritePacket*(
           client.mapCameraReady = true
           client.mapCameraX = -objectDef.x
           client.mapCameraY = -objectDef.y
+        let sprite = client.sprite.spriteInfo(objectDef.spriteId)
+        if not sprite.isNil and sprite.label.votingFrameLabel():
+          client.votingFramePending = true
       of spkDeleteObject:
         let objectId = message.objectId
         if objectId >= 0 and objectId < client.sprite.objects.len:
@@ -485,6 +502,14 @@ proc applySpritePacket*(
   except SpriteProtocolError:
     return false
   true
+
+proc applySpritePacketBytes*(
+  client: ProtocolClient,
+  packet: openArray[uint8],
+  decodePixels = false
+): bool =
+  ## Applies one raw sprite protocol packet to the retained scene state.
+  client.applySpritePacket(blobFromBytes(packet), decodePixels)
 
 proc objectCmp(state: SpriteState, a, b: int): int =
   ## Orders objects by the same stable painter order as the viewer.
@@ -572,17 +597,28 @@ proc receiveLatestFrameInto*(
   ws: WebSocket,
   gui: bool,
   packed,
-  unpacked: var seq[uint8]
+  unpacked: var seq[uint8],
+  timeout = -1
 ): bool {.measure.} =
   ## Receives wire data and updates the provided reusable frame buffers.
   client.frameAdvance = 0
   if client.spritePending == 0:
-    let firstMessage = ws.receiveMessage(if gui: 10 else: -1)
+    let firstMessage = ws.receiveMessage(timeout)
     if firstMessage.isNone:
       client.frameBufferLen = 0
       client.framesDropped = 0
       return false
     ws.acceptPlayerMessage(firstMessage.get, client, gui)
+    if client.votingFramePending:
+      client.frameAdvance = client.spritePending
+      client.framesDropped = max(0, client.spritePending - 1)
+      client.frameBufferLen = 0
+      client.skippedFrames += client.framesDropped
+      client.spritePending = 0
+      client.votingFramePending = false
+      if gui:
+        client.renderSpriteFrame(unpacked, packed)
+      return true
 
   var drained = 0
   while drained < MaxFrameDrain:
@@ -591,6 +627,8 @@ proc receiveLatestFrameInto*(
       break
     ws.acceptPlayerMessage(message.get, client, gui)
     inc drained
+    if client.votingFramePending:
+      break
 
   if client.spritePending == 0:
     client.frameBufferLen = 0
@@ -601,6 +639,7 @@ proc receiveLatestFrameInto*(
   client.frameBufferLen = 0
   client.skippedFrames += client.framesDropped
   client.spritePending = 0
+  client.votingFramePending = false
   if gui:
     client.renderSpriteFrame(unpacked, packed)
   true
