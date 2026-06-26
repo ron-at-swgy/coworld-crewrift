@@ -6,7 +6,7 @@ Current local tool defaults:
 
 - Bucket: `crewrift-prime-tournament`
 - Prefix: `notsus`
-- Profile: `tournament`
+- Profile: `sandbox-andre`
 - Website path: `http://crewrift-prime-tournament.s3-website-us-east-1.amazonaws.com/notsus/`
 
 Generate without publishing:

@@ -32,4 +32,4 @@ __pycache__/
 client/screenshots/
 players/modulabot/modulabot
 players/modulabot/test/parity
-players/notsus/tournament/rounds/*
+players/notsus/tournament/*

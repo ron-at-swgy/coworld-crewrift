@@ -8,7 +8,7 @@ const
   DefaultLeagueId = "league_a12f5172-0907-4d04-8bcb-ca02f5360e3a"
   DefaultS3Bucket = "crewrift-prime-tournament"
   DefaultS3Prefix = "notsus"
-  DefaultAwsProfile = "tournament"
+  DefaultAwsProfile = "sandbox-andre"
   DefaultRoundLimit = 1000
   DefaultUpdateRoundLimit = 50
   MaxRoundsPerPage = 200
@@ -76,7 +76,7 @@ Options:
       --s3-bucket NAME     S3 bucket to sync. Extra objects are preserved.
                            Default: crewrift-prime-tournament.
       --s3-prefix PREFIX   S3 prefix to sync under. Default: notsus.
-      --aws-profile NAME   AWS profile to use. Default: tournament.
+      --aws-profile NAME   AWS profile to use. Default: sandbox-andre.
       --server URL         Observatory API server passed to coworld.
   -h, --help               Show this help text.
 """
@@ -3607,7 +3607,9 @@ proc syncReport(config: ToolConfig) =
       "sync",
       config.outDir,
       target,
-      "--only-show-errors"
+      "--only-show-errors",
+      "--exclude",
+      ".DS_Store"
     ]
   )
   let publicPath =
