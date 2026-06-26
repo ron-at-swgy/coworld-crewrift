@@ -18,14 +18,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 1) Install the vendored stock commissioners package (unmodified upstream).
+# 1) Install the vendored stock commissioners package (unmodified upstream),
+#    plus OpenSkill (patent-free Bayesian skill rating) that powers the
+#    per-policy MMR Competition leaderboard (see mmr.py / rank_division).
 COPY vendor /app/vendor
-RUN pip install --no-cache-dir /app/vendor
+RUN pip install --no-cache-dir /app/vendor "openskill>=6.0.0"
 
 # 2) Overlay the Crewrift Prime decision logic, subclass, entrypoint, debug
 #    script, and ruleset config.
 COPY decision.py /app/decision.py
+COPY mmr.py /app/mmr.py
 COPY game_results_loader.py /app/game_results_loader.py
+COPY xp_request_client.py /app/xp_request_client.py
+COPY replay_parser.py /app/replay_parser.py
+COPY interview.py /app/interview.py
 COPY crewrift_prime_skill_commissioner.py /app/crewrift_prime_skill_commissioner.py
 COPY app.py /app/app.py
 COPY debug_decision.py /app/debug_decision.py

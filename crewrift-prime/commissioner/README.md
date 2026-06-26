@@ -1,26 +1,38 @@
 # Crewrift Prime — advanced-skill commissioner
 
 A custom Coworld commissioner for the **Crewrift Prime** league that replaces the
-stock score-only Qualifiers→Competition gate with a **strict three-skill gate**,
-plus first-class **decision observability** (per-skill scores, verdicts, and a
-human-readable reason for every promotion decision).
+stock score-only Qualifiers→Competition gate with an **event-driven, replay-evaluated
+three-skill gate**, plus first-class **decision observability** (per-skill scores,
+verdicts, and a human-readable reason for every promotion decision).
 
 ## Why a custom image
 
 The stock config-driven `ruleset_strategy` commissioner's transition vocabulary
 (`TransitionCriteriaConfig`, `extra="forbid"`) only allows `completed_episodes_*`
-/ `score_*`. It discards every other field of the per-slot `results_schema` that
-the platform delivers in `EpisodeResult.game_results`. Gating on advanced skills
-requires reading `game_results`, so a code change (this image) is unavoidable.
-Everything else — `crash_check`, division migration, ranking, scheduling — is
-reused unchanged from the vendored stock base (`vendor/commissioners`).
+/ `score_*`, discarding every other field of the per-slot `results_schema`. Gating
+on advanced skills requires reading the game's results ourselves. We go further:
+this image owns the **xp-request client** (`xp_request_client.py`) and the
+**replay parser** (`replay_parser.py`) so the whole "submit → run an experience
+request → evaluate the replay → promote" loop lives in the commissioner. The
+Competition division's win-count scheduling/scoring/ranking is reused.
 
-## The gate — ONE game measures everything ("one game and we're in")
+## Qualification — event-driven, replay-evaluated ("one game and we're in")
 
-Each Qualifiers entrant plays **exactly ONE 8-seat self-play game** of the
-`scn_qualifier` variant. Self-play fills all 8 seats with the entrant, so that
-single game exercises both roles (the entrant plays the imposter(s) AND crew),
-and all three signals come from its per-slot `game_results`:
+There is **no Qualifiers staging division**. When a new policy is submitted, the
+commissioner runs the qualification loop itself (`migrate_league` →
+`qualify_submission`):
+
+1. **Create + poll** a one-game self-play *experience request* for the policy
+   (`POST /v2/experience-requests`, then poll `GET .../{xreq}` / `.../episodes`).
+2. **Download + parse** the completed episode's `.bitreplay`. A Crewrift
+   `.bitreplay` is only per-tick input masks, so deriving metrics requires
+   **re-simulating** it: `replay_parser.py` runs the repo's Nim expander
+   (`tools/expand_replay.nim --format jsonl`, overridable via
+   `CREWRIFT_PRIME_EXPAND_REPLAY_CMD`) to produce the structured `{ts, player,
+   key, value}` event log, then folds it into a per-slot `results_schema` dict.
+3. **Evaluate** the strict three-skill AND gate (`decision.evaluate_combined_game`,
+   reused unchanged) over that one self-play game. Self-play fills all 8 seats with
+   the entrant, so a single game exercises both roles:
 
 | Skill | Metric | Threshold (default, env-overridable) | Computed from the one game |
 |---|---|---|---|
@@ -28,28 +40,22 @@ and all three signals come from its per-slot `game_results`:
 | hunting | `imposter_kills` | `>= 0.5` (`CREWRIFT_PRIME_HUNT_KILLS_MIN`) → ≥1 kill | total `kills` landed by the imposter seat(s) (`imposter`==1) in the game |
 | tasks | `crew_tasks_mean` | `>= 1.0` (`CREWRIFT_PRIME_TASK_TASKS_MIN`) | mean `tasks` across the crew seats (`crew`==1) in the game |
 
-**Promote** (→ Competition, `status=competing` / `substatus=champion`) iff ALL
-three pass. **Hold** in Qualifiers (`status=qualifying` / `substatus=skill_gate`)
-and re-run the single game next round otherwise.
+4. **Promote** (→ Competition, `status=competing` / `substatus=champion`) iff ALL
+   three pass. Otherwise the submission **does not qualify**: it is held
+   `status=qualifying` / `substatus=skill_gate` (in place — there is no qualifier
+   division to hold in) and re-evaluated on its next submission.
 
-**Crash safety is folded into the one game** (no separate crash_check stage):
-- a completed game with results is, by definition, not a crash → evaluate the 3 skills;
-- a genuine non-completion (no results, not infra) → **DQ** ("Failed to complete the qualifier game");
-- an infra/dispatch failure (HTTP 4xx/5xx from `/jobs/batch`, job never created) → **hold & retry**, never DQ.
+**Crash / infra safety** (no separate crash_check stage):
+- a completed, parseable replay with results is, by definition, not a crash → evaluate the 3 skills;
+- a terminal run with **no completed game** (no results, not infra) → **DQ** ("Failed to complete the qualifier game");
+- an **xp-request infra failure** (HTTP 4xx/5xx, run never completes within the budget) or a **replay-expansion failure** (Nim expander unavailable/errors) → **hold & retry**, never DQ.
 
-Single game ⇒ single-game variance; thresholds are deliberately low/easy. The
-`scn_qualifier` variant tuning (natural `imposterCount: 2`, `killCooldownTicks: 90`
-so the imposter kills early → body → report → meeting, `tasksPerPlayer: 8` +
-`maxTicks: 6000` so crew complete tasks without instant-winning, and a generous
-`connectTimeoutTicks: 3600` so all 8 self-play agents connect — see Part 1 below)
-makes one game reliably surface all three signals.
-
-> **Why connectTimeoutTicks: 3600** (Part-1 fix). Episode requests correctly
-> carry 8 `policy_version_ids`, but a slow-starting policy can leave some of its 8
-> self-play agents un-connected within the timeout — they show as `connect_timeout`
-> (e.g. truecrew's crash-check ran with only 2 of 8 connected). Raising the connect
-> window gives all 8 agents time to join. This is a runtime/connection issue, not a
-> seat-expansion bug.
+> **Submission seam.** The stock platform↔commissioner protocol carries no
+> per-submission message, so the commissioner reacts on `migrate_league` — the only
+> entrypoint that sees every membership with its status and returns membership
+> changes. The platform must invoke `migrate_league` (or an equivalent submission
+> hook) when a policy is submitted for qualification to fire promptly. See the
+> repo-root `crewrift-prime/README.md` "Qualifier" section.
 
 ## Competition division — score = WINNING PLAYERS (1 point per winning seat, by role)
 
@@ -69,6 +75,28 @@ scores once **per winning seat** (not once per winning episode).
 - `rank_division` (subclass override) ranks the Competition leaderboard by
   **cumulative points** — the SUM of per-round winning-player counts (no ewma decay) — so the
   leaderboard is a running win total. Other divisions keep the stock ranking.
+
+### Seating — at most ONE real policy per seat, default fillers top up the rest
+
+Competition games are closed-roster 8-seat (`NUM_SEATS`). `_schedule_competition_round`
+seats every **real** entrant **at most once per game** (no real policy occupies
+more than one seat in a round). When fewer than 8 real policies are competing, the
+remaining seats are **topped up with the standard default filler policies** so the
+game can still dispatch.
+
+- The default filler set is configured via the **`CREWRIFT_PRIME_FILLER_POLICY_VERSION_IDS`**
+  env var (comma-separated `policy_version_id` UUIDs) set on the hosted
+  commissioner runnable's `env` — same tuning mechanism as the gate thresholds, so
+  no rebuild is needed. The `notsus` bot version(s) are the intended default (its
+  concrete UUID is environment-specific, hence env-supplied, not hard-coded).
+- **Filler results never count.** Filler (and, when no fillers are configured, the
+  duplicate real-entrant top-up) seats are recorded in the episode's
+  `filler_seats` tag and **excluded** from scoring, `result_metadata`, the
+  `competition_wins` breakdown, and therefore the leaderboard. A policy is only
+  ever credited for the single seat it was legitimately assigned as a real entrant.
+- When the env var is **unset**, no fillers are injected and empty seats fall back
+  to cycling real entrants (so the closed roster can still dispatch) — but those
+  duplicate seats are still excluded from scoring (1 scored seat per real policy).
 
 ### Threshold rationale (lowered 2026-06-24 — "easier for now")
 

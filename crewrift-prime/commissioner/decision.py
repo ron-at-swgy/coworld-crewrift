@@ -50,6 +50,11 @@ VOTE_PARTICIPATION_MIN = _f("CREWRIFT_PRIME_MEETING_PARTICIPATION_MIN", 0.0)
 HUNT_KILLS_MIN = _f("CREWRIFT_PRIME_HUNT_KILLS_MIN", 0.5)
 # Mean tasks completed per seat (task-pressure drill).
 TASK_TASKS_MIN = _f("CREWRIFT_PRIME_TASK_TASKS_MIN", 1.0)
+# Minimum interview score (0..1) the candidate must reach to PASS the LLM
+# interview hard gate. The interview LLM call + grading happen OUTSIDE this pure
+# module (in commissioner/interview.py); decision.py only consumes the numeric
+# score. Env-overridable so the bar can be tuned without a code change.
+INTERVIEW_MIN_SCORE = _f("CREWRIFT_PRIME_INTERVIEW_MIN", 0.5)
 
 # Forward-compat: per-slot "talk" signal. NOT emitted by the crewrift game today
 # (the results_schema has no chat field). When a future game build adds a per-slot
@@ -63,6 +68,9 @@ VOTE_VARIANT = "scn_vote_basic"
 HUNT_VARIANT = "scn_hunt_isolated"
 TASK_VARIANT = "scn_task_pressure"
 SKILL_VARIANTS = (VOTE_VARIANT, HUNT_VARIANT, TASK_VARIANT)
+# The interview is not a game variant — it is an out-of-band LLM Q&A. This id is
+# only a stable label for the interview verdict's ``variant_id`` field.
+INTERVIEW_VARIANT = "interview_llm"
 
 EPISODES_PER_DRILL = int(os.getenv("CREWRIFT_PRIME_EPISODES_PER_DRILL", "4"))
 FORCED_IMPOSTER_SEAT = 0
@@ -107,45 +115,75 @@ SKILL_PRESENTATION: dict[str, dict[str, str]] = {
         "label": "Tasks",
         "blurb": "Complete tasks while seated on the crew.",
     },
+    "interview": {
+        "label": "Interview",
+        "blurb": "Answer the commissioner's Crewrift voting-strategy question.",
+        "threshold_label": "pass the LLM interview",
+    },
 }
 
 # Commissioner-authored "how qualification works" prose. The Observatory renders
 # this verbatim — the web app holds NO game-specific copy. Recorded on every
 # decision (in the open evidence metadata) so the explainer reflects exactly how
-# THIS commissioner gates and scores. ``flow_steps`` is the Submit → Qualifier →
-# Competition spine; ``gate_rule`` is the combiner; ``scoring_blurb`` describes
-# the Competition pool. A different game's commissioner authors its own.
+# THIS commissioner gates and scores. ``flow_steps`` is the Submit → Qualifier xp
+# request → Replay evaluated → Competition spine (event-driven; no qualifier
+# division); ``gate_rule`` is the combiner; ``scoring_blurb`` describes the
+# Competition pool. A different game's commissioner authors its own.
 SKILL_GATE_EXPLAINER: dict[str, Any] = {
     "summary": (
-        "Every new submission lands in the Qualifiers pool. To reach the "
-        "Competition pool — where it plays the real leaderboard — a policy must "
-        "clear one combined qualifier game each round. Anything held in Qualifiers "
-        "is automatically re-tested the next round."
+        "Every new submission is evaluated on its own, the moment it is submitted "
+        "— there is no Qualifiers pool to wait in. The commissioner runs one "
+        "self-play qualifier game for the policy via an experience request, reads "
+        "the resulting replay, AND interviews the policy with an LLM about Crewrift "
+        "voting strategy. A policy that clears all three skills AND passes the "
+        "interview is promoted straight into the Competition pool. A policy that "
+        "does not clear the gate is re-evaluated on its next submission."
     ),
     "flow_steps": [
-        {"title": "Submit", "body": "A new policy version enters the Qualifiers pool (staging)."},
+        {"title": "Submit", "body": "A new policy version is submitted to the league."},
         {
             "title": "Qualifier game",
             "body": (
-                "One 8-seat self-play game measures every skill at once. Strict AND: "
-                "every skill must pass (a policy that can't start the game is disqualified)."
+                "The commissioner runs ONE 8-seat self-play game for the policy via an "
+                "experience request and parses its replay. Strict AND: every skill must "
+                "pass (a policy whose game never completes is disqualified)."
+            ),
+        },
+        {
+            "title": "Interview",
+            "body": (
+                "The commissioner launches the policy's container in interview mode, asks "
+                "it an LLM-generated Crewrift voting-strategy question over a websocket, and "
+                "scores the answer with an LLM. The policy must score at or above the "
+                "interview threshold. The interviewer LLM is resilient: if riddle generation "
+                "fails the commissioner falls back to a built-in question pool, and if the "
+                "scorer LLM fails after an answer was received the interview auto-passes. Only "
+                "a player/transport failure (unreachable interview server, timeout, no answer) "
+                "holds for retry — never a DQ."
             ),
         },
         {
             "title": "Competition",
-            "body": "Pass every skill and the policy is promoted to the Competition pool.",
+            "body": (
+                "Pass every skill AND the interview and the policy is promoted directly to "
+                "the Competition pool."
+            ),
         },
     ],
-    "gate_rule": "AND \u2014 every skill must pass",
+    "gate_rule": "AND \u2014 every skill and the interview must pass",
     "skills_note": (
-        "All skills are read from the single qualifier game and gate on the live "
-        "thresholds shown above. Each entrant's per-skill result and overall verdict "
-        "appear in the Qualifier Skill Gate panel on a completed round."
+        "The voting/hunting/tasks skills are read from the single qualifier game's parsed "
+        "replay; the interview is a separate out-of-band LLM Q&A. All gate on the live "
+        "thresholds shown above. Each submission's per-skill result, interview score, and "
+        "overall verdict appear in the Qualifier Skill Gate panel."
     ),
     "scoring_blurb": (
-        "Once promoted, the Competition leaderboard ranks by total winning "
-        "players \u2014 one point for each player that won as imposter, plus one "
-        "point for each player that won as crew \u2014 accumulated all-time."
+        "Once promoted, the Competition leaderboard ranks policies by an OpenSkill "
+        "(Plackett\u2013Luce) skill rating: each round is one match decided by winning "
+        "players (one point per seat that won as imposter or crew), and a policy's MMR "
+        "is the conservative ordinal mu \u2212 3\u03c3 of that rating. A newly promoted policy "
+        "is rated but unranked (\u201cin placement\u201d) until it has played a few rated "
+        "rounds, so a single lucky win can\u2019t rocket it to the top."
     ),
 }
 
@@ -230,20 +268,21 @@ class DecisionRecord:
 
     @property
     def decision(self) -> str:
-        return "PROMOTED" if self.passed else "HELD_IN_QUALIFIERS"
+        return "PROMOTED" if self.passed else "HELD_FOR_RETRY"
 
     @property
     def short_reason(self) -> str:
         if self.passed:
-            return "Passed Crewrift Prime three-skill gate (voting, hunting, tasks)"
+            skills = ", ".join(v.skill for v in self.verdicts)
+            return f"Passed Crewrift Prime qualification gate ({skills})"
         failed = [v.skill for v in self.verdicts if not v.passed]
-        return f"Held in Qualifiers: failed {', '.join(failed) or 'skill gate'}"
+        return f"Did not qualify: failed {', '.join(failed) or 'skill gate'}"
 
     @property
     def reason(self) -> str:
         """Human-readable reason, e.g.
         'PROMOTED: cast votes in 4/4 meetings \u2713, kills_as_imposter_rate ...'
-        or 'HELD IN QUALIFIERS: failed voting (did not vote in meetings (0/4))'.
+        or 'DID NOT QUALIFY: failed voting (did not vote in meetings (0/4))'.
         """
         if self.passed:
             return "PROMOTED: " + ", ".join(v.phrase() for v in self.verdicts)
@@ -254,7 +293,7 @@ class DecisionRecord:
             for v in self.verdicts
             if not v.passed
         ]
-        return "HELD IN QUALIFIERS: failed " + "; ".join(fails)
+        return "DID NOT QUALIFY: failed " + "; ".join(fails)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -564,6 +603,76 @@ def evaluate_combined_game(game_results: dict[str, Any] | None) -> DecisionRecor
 
 
 # ============================================================================
+# LLM interview hard gate (2026-06-25): a fourth required, threshold-gated skill
+# added ALONGSIDE voting/hunting/tasks. The interview LLM call + grading happen
+# OUTSIDE this pure module (commissioner/interview.py); decision.py only consumes
+# the numeric score (0..1) and an optional degraded flag, and combines it with
+# the skill gate by a strict AND.
+# ============================================================================
+
+
+def interview_verdict(
+    score: float | None,
+    *,
+    degraded: bool = False,
+    detail: str | None = None,
+) -> SkillVerdict:
+    """Pure verdict for the interview: pass iff ``score >= INTERVIEW_MIN_SCORE``.
+
+    ``score`` is the 0..1 grade the commissioner's interview scorer produced
+    (None when the interview was not run — that fails). ``degraded`` flags an
+    answer the player could not actually reason about (LLM unavailable on the
+    player side); it never passes regardless of score. ``detail`` overrides the
+    human phrasing (e.g. the grader's one-line reason).
+    """
+    value = float(score) if isinstance(score, (int, float)) else 0.0
+    passed = (score is not None) and (not degraded) and value >= INTERVIEW_MIN_SCORE
+    if detail is None:
+        if score is None:
+            detail = "interview was not completed"
+        elif degraded:
+            detail = f"player could not answer (degraded); scored {value:.2f}"
+        elif passed:
+            detail = f"answered the voting-strategy question (scored {value:.2f})"
+        else:
+            detail = f"weak voting-strategy answer (scored {value:.2f} < {INTERVIEW_MIN_SCORE:g})"
+    return SkillVerdict(
+        skill="interview",
+        variant_id=INTERVIEW_VARIANT,
+        metric_name="interview_score",
+        metric_value=value,
+        threshold=INTERVIEW_MIN_SCORE,
+        comparator=">=",
+        episodes_counted=0 if score is None else 1,
+        passed=passed,
+        raw_inputs={"degraded": degraded},
+        detail=detail,
+    )
+
+
+def evaluate_combined_game_with_interview(
+    game_results: dict[str, Any] | None,
+    interview_score: float | None,
+    *,
+    interview_degraded: bool = False,
+    interview_detail: str | None = None,
+) -> DecisionRecord:
+    """Strict-AND gate over the three skills PLUS the LLM interview.
+
+    A policy passes only if it clears the skill gate (voting/hunting/tasks from
+    the parsed replay) AND passes the interview (score >= INTERVIEW_MIN_SCORE).
+    The interview is appended as a fourth verdict so the Observatory renders it
+    uniformly. The interview's I/O is done by the caller; this stays pure.
+    """
+    skill_record = evaluate_combined_game(game_results)
+    verdict = interview_verdict(
+        interview_score, degraded=interview_degraded, detail=interview_detail
+    )
+    verdicts = [*skill_record.verdicts, verdict]
+    return DecisionRecord(passed=all(v.passed for v in verdicts), verdicts=verdicts)
+
+
+# ============================================================================
 # Competition division scoring (2026-06-25): "1 point per winning PLAYER, by role".
 #
 # In the Competition division the score counts EVERY winning seat the entrant
@@ -649,3 +758,196 @@ def count_competition_wins(
         crew_wins=crew_wins,
         episodes_counted=len(episodes_with_seats),
     )
+
+
+# ============================================================================
+# Commissioner observability (2026-06-25): structured per-round report + a safe,
+# self-contained HTML render. The platform persists ``RoundComplete.observability``
+# and the Observatory renders both the structured calculation trace and (when
+# present) the commissioner-authored HTML in a sandboxed iframe.
+#
+# render_html MUST obey the platform safe-render profile (no scripts, no external
+# resource loads, no embedding/navigation sinks). We use only a single inline
+# <style> block with literal CSS (no url()/@import) and plain elements — nothing
+# that the producer-side ``assert_safe_render_html`` check rejects.
+# ============================================================================
+
+import html as _html  # noqa: E402  (kept local to the observability section)
+import json  # noqa: E402
+
+# Ink & Print-flavored palette for the embedded HTML (literal hex only; the CSP
+# blocks external fonts/resources so we lean on system fonts + inline styles).
+_REPORT_CSS = """
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;padding:16px;background:#f7f4ee;color:#1f1b16;
+  font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{margin:0 0 2px;font-size:15px;letter-spacing:.02em}
+.rule{color:#6b6258;font-size:12px;margin:0 0 14px}
+.grid{display:grid;grid-template-columns:1fr;gap:10px}
+@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+.card{border:1px solid #e3ddd2;border-radius:5px;background:#fffdf8;padding:10px 12px}
+.head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.pv{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#6b6258;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.pass{background:#e7f0e4;color:#3c6b2f}
+.hold{background:#f3e6d8;color:#9a5b22}
+.steps{margin:8px 0 0;border-top:1px solid #efe9dd}
+.step{display:flex;justify-content:space-between;gap:10px;
+  padding:4px 0;border-bottom:1px solid #efe9dd;font-size:12px}
+.step .lbl{color:#6b6258}
+.step .val{font-variant-numeric:tabular-nums;color:#1f1b16}
+.ok{color:#3c6b2f}.no{color:#9a3b2f}
+.sum{margin:8px 0 0;font-size:11px;color:#6b6258;font-style:italic}
+.notes{margin:14px 0 0;padding:0;list-style:none;font-size:11px;color:#6b6258}
+.notes li{padding:1px 0}
+"""
+
+
+def _fmt(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.2f}".rstrip("0").rstrip(".") if value % 1 else f"{value:g}"
+    if isinstance(value, (list, dict)):
+        return _html.escape(json.dumps(value))
+    return _html.escape(str(value))
+
+
+def _entrant_report_from_decision(entrant: str, player_id: str | None, record: "DecisionRecord") -> dict[str, Any]:
+    steps: list[dict[str, Any]] = []
+    for verdict in record.verdicts:
+        spec = SKILL_PRESENTATION.get(verdict.skill, {})
+        label = spec.get("label", verdict.skill)
+        steps.append(
+            {
+                "label": f"{label}: {verdict.detail or verdict.metric_name}",
+                "value": round(verdict.metric_value, 4),
+                "inputs": dict(verdict.raw_inputs),
+                "passed": verdict.passed,
+            }
+        )
+    return {
+        "policy_version_id": entrant,
+        "player_id": player_id,
+        "outcome": "PROMOTED" if record.passed else "HELD",
+        "passed": record.passed,
+        "steps": steps,
+        "summary": record.reason,
+    }
+
+
+def _render_html(title: str, rule: str, entrants: list[dict[str, Any]], notes: list[str]) -> str:
+    cards = []
+    for e in entrants:
+        passed = e.get("passed")
+        tag_class = "pass" if passed else "hold"
+        step_rows = "".join(
+            f'<div class="step"><span class="lbl">{_html.escape(str(s.get("label", "")))}</span>'
+            f'<span class="val">'
+            f'{"<span class=ok>\u2713</span> " if s.get("passed") is True else ""}'
+            f'{"<span class=no>\u2717</span> " if s.get("passed") is False else ""}'
+            f"{_fmt(s.get('value'))}</span></div>"
+            for s in e.get("steps", [])
+        )
+        summary = (
+            f'<p class="sum">{_html.escape(str(e.get("summary")))}</p>' if e.get("summary") else ""
+        )
+        cards.append(
+            f'<div class="card"><div class="head">'
+            f'<span class="pv" title="{_html.escape(str(e.get("policy_version_id", "")))}">'
+            f'{_html.escape(str(e.get("policy_version_id", "")))}</span>'
+            f'<span class="tag {tag_class}">{_html.escape(str(e.get("outcome", "")))}</span>'
+            f'</div><div class="steps">{step_rows}</div>{summary}</div>'
+        )
+    notes_html = (
+        '<ul class="notes">' + "".join(f"<li>\u00b7 {_html.escape(n)}</li>" for n in notes) + "</ul>"
+        if notes
+        else ""
+    )
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        f"<style>{_REPORT_CSS}</style></head><body>"
+        f"<h1>{_html.escape(title)}</h1>"
+        f'<p class="rule">{_html.escape(rule)}</p>'
+        f'<div class="grid">{"".join(cards)}</div>'
+        f"{notes_html}</body></html>"
+    )
+
+
+def build_qualifier_report(
+    decisions_by_entrant: dict[str, "DecisionRecord"],
+    *,
+    player_id_by_entrant: dict[str, str | None] | None = None,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Structured + HTML observability report for a Qualifiers (skill-gate) round."""
+    player_id_by_entrant = player_id_by_entrant or {}
+    notes = notes or []
+    entrants = [
+        _entrant_report_from_decision(entrant, player_id_by_entrant.get(entrant), record)
+        for entrant, record in decisions_by_entrant.items()
+    ]
+    rule_description = (
+        "Each new submission plays one 8-seat self-play qualifier game (run via an "
+        "experience request, evaluated from its parsed replay) AND is interviewed by the "
+        "commissioner's LLM about Crewrift voting strategy. A strict AND gate over the "
+        "skills below — including the interview — decides promotion: pass every skill and "
+        "the interview to advance to Competition, otherwise the submission does not qualify "
+        "and is re-evaluated on its next submission."
+    )
+    return {
+        "rule_id": "skill_gate",
+        "rule_description": rule_description,
+        "entrants": entrants,
+        "notes": notes,
+        "render_html": _render_html(
+            "Qualifier skill gate", rule_description, entrants, notes
+        ),
+    }
+
+
+def build_competition_report(
+    win_breakdown: list[dict[str, Any]],
+    *,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Structured + HTML observability report for a Competition (win-count) round.
+
+    ``win_breakdown`` items: {policy_version_id, player_id?, wins, imposter_wins,
+    crew_wins, episodes_counted}.
+    """
+    notes = notes or []
+    entrants = []
+    for row in win_breakdown:
+        wins = int(row.get("wins", 0))
+        imp = int(row.get("imposter_wins", 0))
+        crew = int(row.get("crew_wins", 0))
+        eps = int(row.get("episodes_counted", 0))
+        entrants.append(
+            {
+                "policy_version_id": row.get("policy_version_id"),
+                "player_id": row.get("player_id"),
+                "outcome": f"{wins} win{'s' if wins != 1 else ''}",
+                "score": float(wins),
+                "steps": [
+                    {"label": "wins as imposter", "value": imp, "inputs": {"episodes": eps}},
+                    {"label": "wins as crew", "value": crew, "inputs": {"episodes": eps}},
+                    {"label": "total wins (1 pt each)", "value": wins},
+                ],
+                "summary": f"{wins} winning seat(s) across {eps} game(s): {imp} as imposter, {crew} as crew.",
+            }
+        )
+    entrants.sort(key=lambda e: -float(e.get("score") or 0))
+    rule_description = (
+        "Competition scores by WINS: one point per winning seat the entrant occupied this round, "
+        "role-agnostic. The leaderboard accumulates these per-round win totals all-time."
+    )
+    return {
+        "rule_id": "competition_wins",
+        "rule_description": rule_description,
+        "entrants": entrants,
+        "notes": notes,
+        "render_html": _render_html("Competition \u2014 wins", rule_description, entrants, notes),
+    }
