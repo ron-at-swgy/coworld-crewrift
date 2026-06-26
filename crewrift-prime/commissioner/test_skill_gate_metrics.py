@@ -331,10 +331,15 @@ class ObservabilityReportTest(unittest.TestCase):
         self.assertEqual(report["rule_id"], "competition_wins")
         self.assertNotIn("entrants", report)
         html = report["render_html"]
-        # Winner b (3 wins) is rendered before runner-up a (1 win).
-        self.assertIn("3 wins", html)
-        self.assertIn("1 win", html)
-        self.assertLess(html.index("3 wins"), html.index("1 win"))
+        # Compact scoreboard: winner b (3 wins) rendered before runner-up a (1 win),
+        # shown as a big win count + role breakdown (no raw UUIDs).
+        self.assertIn('<span class="big">3</span>', html)
+        self.assertIn('<span class="big">1</span>', html)
+        self.assertLess(
+            html.index('<span class="big">3</span>'),
+            html.index('<span class="big">1</span>'),
+        )
+        self.assertIn("as imposter", html)
 
     def test_render_html_passes_platform_safe_render_check(self) -> None:
         # Load the platform's producer-side safety gate directly (avoid importing

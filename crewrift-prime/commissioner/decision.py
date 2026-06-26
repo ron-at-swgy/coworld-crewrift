@@ -777,32 +777,116 @@ import json  # noqa: E402
 
 # Ink & Print-flavored palette for the embedded HTML (literal hex only; the CSP
 # blocks external fonts/resources so we lean on system fonts + inline styles).
+# A compact, scoreboard-style layout: one row per entrant, readable at a glance,
+# no raw UUIDs leading the eye.
 _REPORT_CSS = """
 :root{color-scheme:light}
 *{box-sizing:border-box}
-body{margin:0;padding:16px;background:#f7f4ee;color:#1f1b16;
-  font:13px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-h1{margin:0 0 2px;font-size:15px;letter-spacing:.02em}
-.rule{color:#6b6258;font-size:12px;margin:0 0 14px}
-.grid{display:grid;grid-template-columns:1fr;gap:10px}
-@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
-.card{border:1px solid #e3ddd2;border-radius:5px;background:#fffdf8;padding:10px 12px}
-.head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
-.pv{font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:#6b6258;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tag{font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+body{margin:0;padding:14px 16px;background:#f7f4ee;color:#1f1b16;
+  font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+h1{margin:0 0 2px;font-size:14px;letter-spacing:.02em;font-weight:600}
+.rule{color:#6b6258;font-size:11.5px;margin:0 0 12px;max-width:70ch}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{text-align:left;font-weight:600;color:#8a7f72;font-size:10px;
+  letter-spacing:.06em;text-transform:uppercase;padding:0 8px 6px;border-bottom:1px solid #e3ddd2}
+thead th.num,tbody td.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody td{padding:7px 8px;border-bottom:1px solid #efe9dd;vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+.who{font-weight:600}
+.id{display:block;font:10px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:#a89e90;margin-top:1px}
+.tag{display:inline-block;font-size:10.5px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap}
 .pass{background:#e7f0e4;color:#3c6b2f}
 .hold{background:#f3e6d8;color:#9a5b22}
-.steps{margin:8px 0 0;border-top:1px solid #efe9dd}
-.step{display:flex;justify-content:space-between;gap:10px;
-  padding:4px 0;border-bottom:1px solid #efe9dd;font-size:12px}
-.step .lbl{color:#6b6258}
-.step .val{font-variant-numeric:tabular-nums;color:#1f1b16}
-.ok{color:#3c6b2f}.no{color:#9a3b2f}
-.sum{margin:8px 0 0;font-size:11px;color:#6b6258;font-style:italic}
-.notes{margin:14px 0 0;padding:0;list-style:none;font-size:11px;color:#6b6258}
+.metrics{color:#6b6258;font-size:11px;line-height:1.5}
+.metrics .ok{color:#3c6b2f;font-weight:600}
+.metrics .no{color:#9a3b2f;font-weight:600}
+.metrics b{color:#1f1b16;font-weight:600}
+.big{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.sub{color:#8a7f72;font-size:10.5px}
+.notes{margin:12px 0 0;padding:0;list-style:none;font-size:11px;color:#8a7f72}
 .notes li{padding:1px 0}
 """
+
+
+def _short_id(value: Any) -> str:
+    """A short, readable handle for an opaque id (last segment of a UUID/ref)."""
+    text = str(value or "")
+    if not text:
+        return "—"
+    tail = text.rsplit("-", 1)[-1] if "-" in text else text
+    return tail[-8:] if len(tail) > 8 else tail
+
+
+def _entrant_label(e: dict[str, Any], index: int) -> tuple[str, str]:
+    """Human label + a subtle id sub-line.
+
+    Prefers a name the commissioner was given (player_name / policy_label), else
+    falls back to a friendly ordinal ("Entrant N") with a short id beneath, so the
+    UI never leads with a raw UUID.
+    """
+    name = e.get("player_name") or e.get("policy_label")
+    sid = _short_id(e.get("policy_version_id") or e.get("player_id"))
+    if name:
+        return _html.escape(str(name)), sid
+    return f"Entrant {index + 1}", sid
+
+
+def _metrics_inline(steps: list[dict[str, Any]]) -> str:
+    """Render skill steps as one compact inline line: name ✓ value · ..."""
+    parts = []
+    for s in steps:
+        label = str(s.get("label", ""))
+        # Steps come in as "Skill: detail" — keep just the skill word for compactness.
+        skill = label.split(":", 1)[0].strip() or label
+        mark = ""
+        if s.get("passed") is True:
+            mark = '<span class="ok">\u2713</span>'
+        elif s.get("passed") is False:
+            mark = '<span class="no">\u2717</span>'
+        parts.append(f"<b>{_html.escape(skill)}</b> {mark}".strip())
+    return " · ".join(parts)
+
+
+def _render_html(title: str, rule: str, entrants: list[dict[str, Any]], notes: list[str], *, mode: str) -> str:
+    """Compact scoreboard HTML. ``mode`` is 'gate' (pass/fail skills) or 'wins'."""
+    rows = []
+    for i, e in enumerate(entrants):
+        who, sid = _entrant_label(e, i)
+        who_cell = f'<span class="who">{who}</span><span class="id">{_html.escape(sid)}</span>'
+        if mode == "wins":
+            wins = e.get("score")
+            wins_txt = _fmt(wins) if wins is not None else "0"
+            rows.append(
+                f"<tr><td>{who_cell}</td>"
+                f'<td class="num"><span class="big">{wins_txt}</span></td>'
+                f'<td class="metrics">{_html.escape(str(e.get("summary") or ""))}</td></tr>'
+            )
+        else:
+            passed = e.get("passed")
+            tag = f'<span class="tag {"pass" if passed else "hold"}">{_html.escape(str(e.get("outcome", "")))}</span>'
+            rows.append(
+                f"<tr><td>{who_cell}</td>"
+                f"<td>{tag}</td>"
+                f'<td class="metrics">{_metrics_inline(e.get("steps", []))}</td></tr>'
+            )
+    head = (
+        "<th>Player</th><th class=num>Wins</th><th>Result</th>"
+        if mode == "wins"
+        else "<th>Player</th><th>Verdict</th><th>Skills</th>"
+    )
+    notes_html = (
+        '<ul class="notes">' + "".join(f"<li>\u00b7 {_html.escape(n)}</li>" for n in notes) + "</ul>"
+        if notes
+        else ""
+    )
+    return (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        f"<style>{_REPORT_CSS}</style></head><body>"
+        f"<h1>{_html.escape(title)}</h1>"
+        f'<p class="rule">{_html.escape(rule)}</p>'
+        f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+        f"{notes_html}</body></html>"
+    )
 
 
 def _fmt(value: Any) -> str:
@@ -815,7 +899,14 @@ def _fmt(value: Any) -> str:
     return _html.escape(str(value))
 
 
-def _entrant_report_from_decision(entrant: str, player_id: str | None, record: "DecisionRecord") -> dict[str, Any]:
+def _entrant_report_from_decision(
+    entrant: str,
+    player_id: str | None,
+    record: "DecisionRecord",
+    *,
+    player_name: str | None = None,
+    policy_label: str | None = None,
+) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     for verdict in record.verdicts:
         spec = SKILL_PRESENTATION.get(verdict.skill, {})
@@ -831,6 +922,8 @@ def _entrant_report_from_decision(entrant: str, player_id: str | None, record: "
     return {
         "policy_version_id": entrant,
         "player_id": player_id,
+        "player_name": player_name,
+        "policy_label": policy_label,
         "outcome": "PROMOTED" if record.passed else "HELD",
         "passed": record.passed,
         "steps": steps,
@@ -838,55 +931,31 @@ def _entrant_report_from_decision(entrant: str, player_id: str | None, record: "
     }
 
 
-def _render_html(title: str, rule: str, entrants: list[dict[str, Any]], notes: list[str]) -> str:
-    cards = []
-    for e in entrants:
-        passed = e.get("passed")
-        tag_class = "pass" if passed else "hold"
-        step_rows = "".join(
-            f'<div class="step"><span class="lbl">{_html.escape(str(s.get("label", "")))}</span>'
-            f'<span class="val">'
-            f'{"<span class=ok>\u2713</span> " if s.get("passed") is True else ""}'
-            f'{"<span class=no>\u2717</span> " if s.get("passed") is False else ""}'
-            f"{_fmt(s.get('value'))}</span></div>"
-            for s in e.get("steps", [])
-        )
-        summary = (
-            f'<p class="sum">{_html.escape(str(e.get("summary")))}</p>' if e.get("summary") else ""
-        )
-        cards.append(
-            f'<div class="card"><div class="head">'
-            f'<span class="pv" title="{_html.escape(str(e.get("policy_version_id", "")))}">'
-            f'{_html.escape(str(e.get("policy_version_id", "")))}</span>'
-            f'<span class="tag {tag_class}">{_html.escape(str(e.get("outcome", "")))}</span>'
-            f'</div><div class="steps">{step_rows}</div>{summary}</div>'
-        )
-    notes_html = (
-        '<ul class="notes">' + "".join(f"<li>\u00b7 {_html.escape(n)}</li>" for n in notes) + "</ul>"
-        if notes
-        else ""
-    )
-    return (
-        "<!doctype html><html><head><meta charset=\"utf-8\">"
-        f"<style>{_REPORT_CSS}</style></head><body>"
-        f"<h1>{_html.escape(title)}</h1>"
-        f'<p class="rule">{_html.escape(rule)}</p>'
-        f'<div class="grid">{"".join(cards)}</div>'
-        f"{notes_html}</body></html>"
-    )
-
-
 def build_qualifier_report(
     decisions_by_entrant: dict[str, "DecisionRecord"],
     *,
     player_id_by_entrant: dict[str, str | None] | None = None,
+    player_name_by_entrant: dict[str, str | None] | None = None,
+    policy_label_by_entrant: dict[str, str | None] | None = None,
     notes: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Structured + HTML observability report for a Qualifiers (skill-gate) round."""
+    """Structured + HTML observability report for a Qualifiers (skill-gate) round.
+
+    Name maps are optional: pass ``player_name_by_entrant`` / ``policy_label_by_entrant``
+    when the commissioner has them so the HTML shows a human handle instead of an id.
+    """
     player_id_by_entrant = player_id_by_entrant or {}
+    player_name_by_entrant = player_name_by_entrant or {}
+    policy_label_by_entrant = policy_label_by_entrant or {}
     notes = notes or []
     entrants = [
-        _entrant_report_from_decision(entrant, player_id_by_entrant.get(entrant), record)
+        _entrant_report_from_decision(
+            entrant,
+            player_id_by_entrant.get(entrant),
+            record,
+            player_name=player_name_by_entrant.get(entrant),
+            policy_label=policy_label_by_entrant.get(entrant),
+        )
         for entrant, record in decisions_by_entrant.items()
     ]
     rule_description = (
@@ -906,7 +975,7 @@ def build_qualifier_report(
         # evidence (skill_gate), which the Observatory renders separately. The
         # entrants list is used solely to build the HTML below.
         "render_html": _render_html(
-            "Qualifier skill gate", rule_description, entrants, notes
+            "Qualifier skill gate", rule_description, entrants, notes, mode="gate"
         ),
     }
 
@@ -932,14 +1001,11 @@ def build_competition_report(
             {
                 "policy_version_id": row.get("policy_version_id"),
                 "player_id": row.get("player_id"),
+                "player_name": row.get("player_name"),
+                "policy_label": row.get("policy_label"),
                 "outcome": f"{wins} win{'s' if wins != 1 else ''}",
                 "score": float(wins),
-                "steps": [
-                    {"label": "wins as imposter", "value": imp, "inputs": {"episodes": eps}},
-                    {"label": "wins as crew", "value": crew, "inputs": {"episodes": eps}},
-                    {"label": "total wins (1 pt each)", "value": wins},
-                ],
-                "summary": f"{wins} winning seat(s) across {eps} game(s): {imp} as imposter, {crew} as crew.",
+                "summary": f"{imp} as imposter · {crew} as crew · {eps} game{'s' if eps != 1 else ''}",
             }
         )
     entrants.sort(key=lambda e: -float(e.get("score") or 0))
@@ -952,5 +1018,5 @@ def build_competition_report(
         "rule_description": rule_description,
         "notes": notes,
         # HTML view only; per-entrant detail stays in result_metadata / events.
-        "render_html": _render_html("Competition \u2014 wins", rule_description, entrants, notes),
+        "render_html": _render_html("Competition \u2014 wins", rule_description, entrants, notes, mode="wins"),
     }
