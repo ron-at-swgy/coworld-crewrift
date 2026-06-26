@@ -79,6 +79,8 @@ from commissioners.common.protocol import (
 )
 from commissioners.common.commissioners import register_commissioner
 from commissioners.common.models import (
+    DivisionCommissionerDescriptionPublic,
+    DivisionDescriptionContext,
     DivisionLeaderboardContext,
     DivisionLeaderboardSnapshot,
     LeaderboardRecentRoundPublic,
@@ -876,6 +878,26 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 )
             ),
         )
+
+    def describe_division(self, ctx: DivisionDescriptionContext) -> DivisionCommissionerDescriptionPublic:
+        """Inherit the base description, but state the REAL Competition scoring
+        (OpenSkill MMR), since the stock text describes a mean-score EWMA the
+        commissioner no longer uses."""
+        description = super().describe_division(ctx)
+        if str(getattr(ctx.division, "type", "")) == _COMPETITION_DIVISION_TYPE:
+            description.leaderboard_rules = (
+                "Players are ranked by skill rating (MMR), not raw score. A player's row is "
+                "their best policy version's rating."
+            )
+            description.scoring_mechanics = (
+                "Each completed Competition round is one OpenSkill (Plackett\u2013Luce) match, with "
+                "entrants ordered by winning players (one point per seat that won as imposter or "
+                "crew). A policy's MMR is the conservative ordinal mu \u2212 3\u03c3 of its rating; a newly "
+                "promoted policy is rated but unranked (\u201cin placement\u201d) until it has played a few "
+                "rated rounds, so a single lucky win can't rocket it to the top. The commissioner "
+                "computes the ranking and the platform serves it."
+            )
+        return description
 
     def rank_division(self, ctx: DivisionLeaderboardContext) -> list[DivisionLeaderboardSnapshot]:
         """Competition leaderboard = per-policy OpenSkill MMR, collapsed to player.
