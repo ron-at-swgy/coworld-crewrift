@@ -311,24 +311,30 @@ class ObservabilityReportTest(unittest.TestCase):
             "scores": [100, 100, 0, 0, 0, 0, 0, 0],
         }
 
-    def test_qualifier_report_has_steps_and_html(self) -> None:
+    def test_qualifier_report_carries_html_not_duplicate_entrants(self) -> None:
         record = evaluate_combined_game(self._combined_game())
         report = build_qualifier_report({"pv-1": record}, player_id_by_entrant={"pv-1": "ply_a"})
         self.assertEqual(report["rule_id"], "skill_gate")
-        entrant = report["entrants"][0]
-        self.assertEqual(entrant["outcome"], "PROMOTED")
-        self.assertEqual(len(entrant["steps"]), 3)
+        # The per-entrant scoring trace is NOT duplicated in the report (it lives
+        # on PolicyMembershipEvent evidence); only the HTML view is carried.
+        self.assertNotIn("entrants", report)
         self.assertIn("<html", report["render_html"])
+        self.assertIn("PROMOTED", report["render_html"])
 
-    def test_competition_report_ranks_by_wins(self) -> None:
+    def test_competition_report_html_reflects_win_ranking(self) -> None:
         report = build_competition_report(
             [
                 {"policy_version_id": "a", "wins": 1, "imposter_wins": 1, "crew_wins": 0, "episodes_counted": 4},
                 {"policy_version_id": "b", "wins": 3, "imposter_wins": 1, "crew_wins": 2, "episodes_counted": 4},
             ]
         )
-        self.assertEqual(report["entrants"][0]["policy_version_id"], "b")
-        self.assertEqual(report["entrants"][0]["outcome"], "3 wins")
+        self.assertEqual(report["rule_id"], "competition_wins")
+        self.assertNotIn("entrants", report)
+        html = report["render_html"]
+        # Winner b (3 wins) is rendered before runner-up a (1 win).
+        self.assertIn("3 wins", html)
+        self.assertIn("1 win", html)
+        self.assertLess(html.index("3 wins"), html.index("1 win"))
 
     def test_render_html_passes_platform_safe_render_check(self) -> None:
         # Load the platform's producer-side safety gate directly (avoid importing

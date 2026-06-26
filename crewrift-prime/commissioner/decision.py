@@ -900,8 +900,11 @@ def build_qualifier_report(
     return {
         "rule_id": "skill_gate",
         "rule_description": rule_description,
-        "entrants": entrants,
         "notes": notes,
+        # Only the HTML view is persisted in the report. The per-entrant scoring
+        # detail is NOT duplicated here — it lives on each PolicyMembershipEvent's
+        # evidence (skill_gate), which the Observatory renders separately. The
+        # entrants list is used solely to build the HTML below.
         "render_html": _render_html(
             "Qualifier skill gate", rule_description, entrants, notes
         ),
@@ -947,7 +950,7 @@ def build_competition_report(
     return {
         "rule_id": "competition_wins",
         "rule_description": rule_description,
-        "entrants": entrants,
         "notes": notes,
+        # HTML view only; per-entrant detail stays in result_metadata / events.
         "render_html": _render_html("Competition \u2014 wins", rule_description, entrants, notes),
     }
