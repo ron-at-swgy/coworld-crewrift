@@ -4,6 +4,8 @@ import
   curly
 
 const
+  BedrockVersion = "bedrock-2023-05-31"
+  BedrockTransport = "invoke-model-sigv4"
   DefaultRegion = "us-east-1"
   DefaultModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   DefaultPlayerName = "notsus"
@@ -13,6 +15,8 @@ const
   StsAction = "AssumeRoleWithWebIdentity"
   MaxMetadataValueLen = 256
   BedrockTimeoutSeconds = 5.0'f32
+  BedrockMaxTokens = 512
+  BedrockTemperature = 0.2
 
 type
   BedrockError = object of CatchableError
@@ -118,16 +122,17 @@ proc bedrockHost(): string =
   "bedrock-runtime." & region() & ".amazonaws.com"
 
 proc bedrockPath(): string =
-  ## Returns the REST path for a Bedrock Converse request.
-  "/model/" & model().awsUriEncode() & "/converse"
+  ## Returns the REST path for a Bedrock InvokeModel request.
+  "/model/" & model().awsUriEncode() & "/invoke"
 
 proc bedrockUrl(): string =
-  ## Returns the Bedrock Runtime Converse URL.
+  ## Returns the Bedrock Runtime InvokeModel URL.
   "https://" & bedrockHost() & bedrockPath()
 
 proc runtimeText*(): string =
   ## Returns the Bedrock request method and target model summary.
-  "method=converse-sigv4 model=" & model() & " region=" & region()
+  "method=" & BedrockTransport & " model=" & model() &
+    " region=" & region()
 
 proc intField(node: JsonNode, name: string): int =
   ## Reads one integer JSON field if present.
@@ -167,7 +172,7 @@ proc requestMetadataKeys*(): string =
     result.add key
 
 proc conversationBody(messages: openArray[ConversationMessage]): string =
-  ## Builds one Bedrock Converse JSON request body.
+  ## Builds one Anthropic Bedrock InvokeModel JSON request body.
   var
     systemText = ""
     chat = newJArray()
@@ -179,15 +184,15 @@ proc conversationBody(messages: openArray[ConversationMessage]): string =
     else:
       var item = newJObject()
       item["role"] = %message.role
-      item["content"] = %* [{"text": message.content}]
+      item["content"] = %message.content
       chat.add item
-  var inference = newJObject()
-  inference["maxTokens"] = %4096
   var root = newJObject()
+  root["anthropic_version"] = %BedrockVersion
+  root["max_tokens"] = %BedrockMaxTokens
+  root["temperature"] = %BedrockTemperature
   if systemText.len > 0:
-    root["system"] = %* [{"text": systemText}]
+    root["system"] = %systemText
   root["messages"] = chat
-  root["inferenceConfig"] = inference
   root["requestMetadata"] = requestMetadata()
   $root
 
@@ -330,9 +335,9 @@ proc resolvedCredentialText*(): string =
   let credentials = resolveCredentials()
   result = "source=" & credentials.source & " access_key=present"
   if credentials.sessionToken.len > 0:
-    result.add " session_token=present"
+    result.add " session=present"
   else:
-    result.add " session_token=missing"
+    result.add " session=missing"
 
 proc canonicalHeaders(
   headers: openArray[(string, string)]
@@ -370,6 +375,7 @@ proc signedHeaders(
     amzDate = nowUtc.format("yyyyMMdd'T'HHmmss'Z'")
     bodyHash = body.sha256Hex()
   var headers = @[
+    ("accept", "application/json"),
     ("content-type", "application/json"),
     ("host", bedrockHost()),
     ("x-amz-content-sha256", bodyHash),
@@ -396,20 +402,37 @@ proc signedHeaders(
   result = headers
 
 proc parseReply(body: string): string =
-  ## Extracts output text from one Bedrock Converse response body.
+  ## Extracts output text from one Bedrock InvokeModel response body.
   let data = parseJson(body)
   if data.hasKey("usage"):
     let usage = data["usage"]
-    lastUsage = "input=" & $usage.intField("inputTokens") &
-      " output=" & $usage.intField("outputTokens") &
-      " cache_read=" & $usage.intField("cacheReadInputTokens") &
-      " cache_write=" & $usage.intField("cacheWriteInputTokens")
+    let
+      inputTokens = usage.intField("input_tokens") +
+        usage.intField("inputTokens")
+      outputTokens = usage.intField("output_tokens") +
+        usage.intField("outputTokens")
+      cacheRead = usage.intField("cache_read_input_tokens") +
+        usage.intField("cacheReadInputTokens")
+      cacheWrite = usage.intField("cache_creation_input_tokens") +
+        usage.intField("cacheWriteInputTokens")
+    lastUsage = "input=" & $inputTokens &
+      " output=" & $outputTokens &
+      " cache_read=" & $cacheRead &
+      " cache_write=" & $cacheWrite
   else:
     lastUsage = ""
-  let content = data["output"]["message"]["content"]
-  for part in content:
-    if part.kind == JObject and part.hasKey("text"):
-      result.add part["text"].getStr()
+  if data.hasKey("content"):
+    for part in data["content"]:
+      if part.kind == JObject and part.hasKey("text"):
+        result.add part["text"].getStr()
+    return
+  if data.hasKey("output") and
+      data["output"].hasKey("message") and
+      data["output"]["message"].hasKey("content"):
+    let content = data["output"]["message"]["content"]
+    for part in content:
+      if part.kind == JObject and part.hasKey("text"):
+        result.add part["text"].getStr()
 
 proc lastUsageText*(): string =
   ## Returns compact usage text for the previous Bedrock call.
@@ -420,7 +443,7 @@ proc lastErrorText*(): string =
   lastError
 
 proc talkToAI*(messages: var seq[ConversationMessage]): string =
-  ## Sends messages to Bedrock Converse and returns the reply text.
+  ## Sends messages to Bedrock InvokeModel and returns the reply text.
   lastUsage = ""
   lastError = ""
   try:
@@ -434,9 +457,9 @@ proc talkToAI*(messages: var seq[ConversationMessage]): string =
         timeout = BedrockTimeoutSeconds
       )
     if response.code != 200:
-      fail("Bedrock Converse returned HTTP " & $response.code & ".")
+      fail("Bedrock InvokeModel returned HTTP " & $response.code & ".")
     result = response.body.parseReply()
     messages.add ConversationMessage(role: "assistant", content: result)
   except CatchableError as error:
     lastError = error.msg
-    echo "ERROR: notsus Bedrock Converse failed: ", error.msg
+    echo "ERROR: notsus Bedrock InvokeModel failed: ", error.msg
