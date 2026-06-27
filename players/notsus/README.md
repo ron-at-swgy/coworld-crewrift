@@ -182,3 +182,39 @@ is in `notsus.nim`.
 The fastest way to improve the bot is to watch a replay, name the failed
 capability, jump to the function above, make one small change, and run the bot
 again.
+
+
+# Tournament reports
+
+This folder tracks AWS-facing defaults for the Notsus Crewrift Prime reports.
+
+Current local tool defaults:
+
+- Bucket: `crewrift-prime-tournament`
+- Prefix: `notsus`
+- Profile: `sandbox-andre`
+- Website path: `http://crewrift-prime-tournament.s3-website-us-east-1.amazonaws.com/notsus/`
+
+Generate without publishing:
+
+```sh
+nim r players/notsus/tools/tournament.nim -- --update --no-s3-sync
+```
+
+Publish with the default bucket and prefix:
+
+```sh
+nim r players/notsus/tools/tournament.nim -- --update
+```
+
+
+# Run Tools
+
+```sh
+nim r tools/run.nim -- \
+  crewborg-aaln:v17 crewborg-aaln:v17 crewborg-aaln:v17 \
+  crewborg-aaln:v17 crewborg-aaln:v17 crewborg-aaln:v17 \
+  notsus:v2 notsus:v2 \
+  -n:10 \
+  --name "notsus 2 imposters vs crewborg-aaln v17"
+```
