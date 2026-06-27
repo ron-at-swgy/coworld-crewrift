@@ -2,15 +2,18 @@ import
   std/algorithm
 
 const
-  ScorePlotWidth = 500
+  ReportScoreMin* = -10
+  ReportScoreMax* = 150
+  ReportScoreTickStep* = 20
+  ScorePlotWidth = 720
   ScorePlotLeftLabelWidth = 270
-  ScorePlotRightPadding = 24
-  ScorePlotAxisMin = -30
-  ScorePlotAxisMax = 50
-  ScorePlotTickStep = 10
+  ScorePlotRightPadding = 28
+  ScorePlotAxisMin = ReportScoreMin
+  ScorePlotAxisMax = ReportScoreMax
+  ScorePlotTickStep = ReportScoreTickStep
   ScorePlotTopHeight = 58
   ScorePlotRowHeight = 56
-  ScorePlotHistogramStep = 2
+  ScorePlotHistogramStep = 4
   ScorePlotHistogramCount =
     (ScorePlotAxisMax - ScorePlotAxisMin) div ScorePlotHistogramStep + 1
   ScorePlotHistogramHeight = ScorePlotRowHeight div 2 - 5

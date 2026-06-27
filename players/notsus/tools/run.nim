@@ -21,13 +21,13 @@ const
   ScoreEpsilon = 0.005
   VersionChartWidth = 760
   VersionChartHeight = 400
-  VersionChartLeft = 44
+  VersionChartLeft = 52
   VersionChartRight = 16
   VersionChartTop = 22
   VersionChartBottom = 44
-  VersionChartScoreMin = 0
-  VersionChartScoreMax = 40
-  VersionChartScoreStep = 10
+  VersionChartScoreMin = ReportScoreMin
+  VersionChartScoreMax = ReportScoreMax
+  VersionChartScoreStep = ReportScoreTickStep
   VersionChartDefaultMaxVersion = 50
   PreloadFonts = [
     "ETBembo-RomanOSF.otf",
@@ -1803,7 +1803,7 @@ proc pageStart(title, cssHref: string): string =
   result.add "    .games-table { table-layout: fixed; width: 100%; }\n"
   result.add "    .games-table .game-col { width: 9rem; }\n"
   result.add "    .games-table .seat-name-col { width: 2.2rem; }\n"
-  result.add "    .games-table .seat-score-col { width: 3rem; }\n"
+  result.add "    .games-table .seat-score-col { width: 3.8rem; }\n"
   result.add "    .games-table .result-col { width: 4rem; }\n"
   result.add "    .games-table th, .games-table td { "
   result.add "padding-right: 0.45rem; white-space: nowrap; }\n"

@@ -1565,7 +1565,7 @@ proc pageStart(title, cssHref: string): string =
   result.add "text-overflow: ellipsis; "
   result.add "white-space: nowrap; }\n"
   result.add "    .round-games .game-col { width: 7.3rem; }\n"
-  result.add "    .round-games .score-col { width: 3rem; }\n"
+  result.add "    .round-games .score-col { width: 3.8rem; }\n"
   result.add "    .round-games .game-cell a, "
   result.add ".round-games .player-cell a { display: block; max-width: 100%; "
   result.add "overflow: hidden; text-overflow: ellipsis; "
