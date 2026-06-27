@@ -15,9 +15,7 @@ const
   UploadAttempts = 12
   UploadRetryMs = 30_000
   UploadRetrySeconds = UploadRetryMs div 1_000
-  DefaultBedrockKeyFile = "/Users/me/secrets/bedrock.key"
   DefaultBedrockModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-  DefaultAwsRegion = "us-east-1"
   DefaultUploadName = "notsus"
   BaselinePolicyLabel = "notsus:v1"
   ScoreEpsilon = 0.005
@@ -67,9 +65,9 @@ Options:
                              Default: notsus, which uploads as notsus:vN.
       --image-tag TAG        Docker image tag for current-checkout uploads.
       --bedrock-key-file PATH
-                             Bedrock bearer key for uploaded current bot.
+                             Ignored legacy option. Uploads use --use-bedrock.
       --bedrock-model MODEL  Bedrock model for uploaded current bot.
-      --aws-region REGION   AWS region for uploaded current bot.
+      --aws-region REGION   Ignored legacy option. The runner sets region.
       --coworld ID           Direct Coworld target. Defaults to the league.
       --eight-player          Kept for compatibility. This is the default.
       --league ID            League target instead of direct Coworld.
@@ -147,9 +145,7 @@ type
     uploadCurrentIndex: int
     uploadName: string
     imageTag: string
-    bedrockKeyFile: string
     bedrockModel: string
-    awsRegion: string
     leagueId: string
     coworldId: string
     coworldDir: string
@@ -240,17 +236,9 @@ proc defaultConfig(): ToolConfig =
   ToolConfig(
     games: DefaultGames,
     outDir: centralRunsDir(),
-    bedrockKeyFile: getEnv(
-      "BEDROCK_API_KEY_FILE",
-      DefaultBedrockKeyFile
-    ),
     bedrockModel: getEnv(
       "BEDROCK_CLAUDE_MODEL_ID",
       getEnv("BEDROCK_MODEL", DefaultBedrockModel)
-    ),
-    awsRegion: getEnv(
-      "AWS_REGION",
-      getEnv("AWS_DEFAULT_REGION", DefaultAwsRegion)
     ),
     uploadCurrentIndex: -1,
     uploadName: DefaultUploadName,
@@ -745,11 +733,11 @@ proc readConfig(): ToolConfig =
       of "image-tag":
         result.imageTag = optionValue(params, i, name, pair.value)
       of "bedrock-key-file":
-        result.bedrockKeyFile = optionValue(params, i, name, pair.value)
+        discard optionValue(params, i, name, pair.value)
       of "bedrock-model":
         result.bedrockModel = optionValue(params, i, name, pair.value)
       of "aws-region":
-        result.awsRegion = optionValue(params, i, name, pair.value)
+        discard optionValue(params, i, name, pair.value)
       of "out-dir":
         result.outDir = optionValue(params, i, name, pair.value)
       of "coworld":
@@ -855,9 +843,6 @@ proc readConfig(): ToolConfig =
     fail("--coworld-dir does not exist: " & result.coworldDir)
   if not fileExists(result.tufteDir / "tufte.css"):
     fail("--tufte-dir is missing tufte.css: " & result.tufteDir)
-  if result.uploadCurrent and result.bedrockKeyFile.len > 0 and
-      not fileExists(result.bedrockKeyFile):
-    fail("--bedrock-key-file does not exist: " & result.bedrockKeyFile)
   if result.name.len == 0:
     result.name = rosterTitle(result.bots)
 
@@ -1261,21 +1246,6 @@ proc buildCurrentImage(image: string) =
   ]
   runAttached(command, workingDir = gameDir())
 
-proc readBedrockToken(config: ToolConfig): string =
-  ## Reads the Bedrock bearer token for policy upload.
-  result = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
-  if result.len > 0:
-    return
-  let filePath = getEnv("AWS_BEARER_TOKEN_BEDROCK_FILE").strip()
-  if filePath.len > 0 and fileExists(filePath):
-    return readFile(filePath).strip()
-  if config.bedrockKeyFile.len > 0 and fileExists(config.bedrockKeyFile):
-    return readFile(config.bedrockKeyFile).strip()
-  fail(
-    "No Bedrock bearer token found. Set AWS_BEARER_TOKEN_BEDROCK or " &
-      "--bedrock-key-file."
-  )
-
 proc parseUploadLabel(output: string): string =
   ## Extracts the uploaded policy label from coworld output.
   const Prefix = "Upload complete:"
@@ -1290,7 +1260,6 @@ proc uploadCurrentPolicy(config: ToolConfig): BotRef =
   let
     policyName = config.uploadName
     image = currentImageTag(config)
-    token = readBedrockToken(config)
 
   echo "Building current checkout: " & image
   buildCurrentImage(image)
@@ -1305,18 +1274,15 @@ proc uploadCurrentPolicy(config: ToolConfig): BotRef =
       policyName,
       "--run",
       "/bin/notsus",
-      "--secret-env",
-      "AWS_BEARER_TOKEN_BEDROCK=" & token,
-      "--secret-env",
-      "BEDROCK_MODEL=" & config.bedrockModel,
-      "--secret-env",
-      "BEDROCK_CLAUDE_MODEL_ID=" & config.bedrockModel,
-      "--secret-env",
-      "AWS_REGION=" & config.awsRegion,
-      "--secret-env",
-      "AWS_DEFAULT_REGION=" & config.awsRegion,
+      "--use-bedrock",
+      "--bedrock-model",
+      config.bedrockModel,
       "--tag",
       "source=players/notsus/tools/run.nim",
+      "--tag",
+      "bedrock=use-bedrock",
+      "--tag",
+      "player=" & policyName,
       "--tag",
       "worktree=" & extractFilename(rootDir()),
       "--tag",

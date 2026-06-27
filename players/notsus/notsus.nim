@@ -2,9 +2,9 @@ import
   std/[algorithm, exitprocs, json, monotimes, options, os,
     parseopt, random, strutils, times],
   bitworld/[pixelfonts, spriteprotocol, server],
-  bitworld/ais/bedrock as bedrockAi,
   pixie,
   ../../src/crewrift/sim,
+  notsus/bedrocks as bedrockAi,
   notsus/protocols,
   notsus/navigation
 when defined(profileTracePath):
@@ -4986,33 +4986,8 @@ proc printVotingEvidence(bot: var Bot) =
   if evidence.len > 0:
     bot.logBlock("notsus voting evidence", evidence)
 
-proc envOrFile(
-  name,
-  fileName: string
-): tuple[value: string, source: string] =
-  ## Returns an environment value or the stripped content of a file env.
-  result.value = getEnv(name).strip()
-  if result.value.len > 0:
-    result.source = name
-    return
-  let path = getEnv(fileName).strip()
-  if path.len > 0 and fileExists(path):
-    result.value = readFile(path).strip()
-    if result.value.len > 0:
-      result.source = "file from " & fileName
-
-proc bedrockVotingToken(): tuple[value: string, source: string] =
-  ## Returns the configured Bedrock bearer token for voting.
-  result = envOrFile(
-    "AWS_BEARER_TOKEN_BEDROCK",
-    "AWS_BEARER_TOKEN_BEDROCK_FILE"
-  )
-  if result.value.len == 0:
-    result = envOrFile("BEDROCK_KEY", "BEDROCK_API_KEY_FILE")
-
 proc configureVotingBedrock(bot: var Bot): bool =
-  ## Copies voting Bedrock env and file settings into the shared adapter.
-  let token = bedrockVotingToken()
+  ## Copies voting Bedrock env settings into the shared adapter.
   let
     model = getEnv(
       "BEDROCK_CLAUDE_MODEL_ID",
@@ -5022,27 +4997,31 @@ proc configureVotingBedrock(bot: var Bot): bool =
       "AWS_REGION",
       getEnv("AWS_DEFAULT_REGION")
     ).strip()
+    credentialSource = bedrockAi.credentialSignalText()
   if not bot.bedrockConfigLogged:
-    if token.value.len > 0:
+    if credentialSource.len > 0:
       bot.logEvent(
-        "notsus bedrock token found: source=" & token.source
+        "notsus bedrock credentials enabled: source=" &
+          credentialSource
       )
     else:
       bot.logEvent(
-        "notsus bedrock token missing: checked " &
-          "AWS_BEARER_TOKEN_BEDROCK, " &
-          "AWS_BEARER_TOKEN_BEDROCK_FILE, BEDROCK_KEY, " &
-          "BEDROCK_API_KEY_FILE"
+        "notsus bedrock credentials missing: expected " &
+          "USE_BEDROCK or AWS credential env"
       )
     bot.logEvent(
       "notsus bedrock config: model=" &
         (if model.len > 0: model else: "default") &
-        " region=" & (if region.len > 0: region else: "default")
+        " region=" & (if region.len > 0: region else: "default") &
+        " transport=converse-sigv4"
+    )
+    bot.logEvent(
+      "notsus bedrock metadata keys: " &
+        bedrockAi.requestMetadataKeys()
     )
     bot.bedrockConfigLogged = true
-  if token.value.len == 0:
+  if not bedrockAi.hasAwsCredentialSignal():
     return false
-  bedrockAi.bedrockKey = token.value
   if model.len > 0:
     bedrockAi.bedrockModel = model
   if region.len > 0:
@@ -5365,9 +5344,9 @@ proc callVotingLlm(bot: var Bot): bool =
   ## Calls Bedrock for one voting action when credentials are configured.
   bot.logVotingLlmPrompt()
   if not bot.configureVotingBedrock():
-    bot.logEvent("notsus voting llm skipped: no Bedrock token configured")
+    bot.logEvent("notsus voting llm skipped: Bedrock is not enabled")
     bot.logEvent(
-      "set AWS_BEARER_TOKEN_BEDROCK_FILE or AWS_BEARER_TOKEN_BEDROCK"
+      "upload with --use-bedrock or run locally with AWS credentials"
     )
     return false
   var messages = @[
@@ -5379,6 +5358,10 @@ proc callVotingLlm(bot: var Bot): bool =
   ]
   bot.logSendingToLlm(messages)
   var reply = bedrockAi.talkToAI(messages)
+  if bedrockAi.lastUsageText().len > 0:
+    bot.logEvent("notsus bedrock usage: " & bedrockAi.lastUsageText())
+  if bedrockAi.lastErrorText().len > 0:
+    bot.logEvent("notsus bedrock error: " & bedrockAi.lastErrorText())
   bot.logBlock("notsus voting llm raw", reply)
   var parsed = parseVotingLlmAction(reply)
   if parsed.ok:
@@ -5405,6 +5388,10 @@ proc callVotingLlm(bot: var Bot): bool =
     )
     bot.logSendingToLlm(messages)
     reply = bedrockAi.talkToAI(messages)
+    if bedrockAi.lastUsageText().len > 0:
+      bot.logEvent("notsus bedrock usage: " & bedrockAi.lastUsageText())
+    if bedrockAi.lastErrorText().len > 0:
+      bot.logEvent("notsus bedrock error: " & bedrockAi.lastErrorText())
     bot.logBlock("notsus voting llm raw", reply)
     parsed = parseVotingLlmAction(reply)
     if parsed.ok:
