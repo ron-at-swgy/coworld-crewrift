@@ -7321,6 +7321,51 @@ when not defined(italkalotLibrary) and defined(botHeadless):
     true
 
 when not defined(italkalotLibrary):
+  proc redactedTokenUrl(url: string): string =
+    ## Returns a URL with any websocket player token redacted.
+    const Prefix = "token="
+    var i = 0
+    while i < url.len:
+      if i + Prefix.len <= url.len and
+          url[i ..< i + Prefix.len] == Prefix:
+        result.add Prefix & "<redacted>"
+        i += Prefix.len
+        while i < url.len and url[i] notin {'&', ' ', '\t', '\r', '\n'}:
+          inc i
+      else:
+        result.add url[i]
+        inc i
+
+  proc urlHasQueryParam(url, key: string): bool =
+    ## Returns true when a URL already carries one query key.
+    url.contains("?" & key & "=") or url.contains("&" & key & "=")
+
+  proc playerTokenPresent(url, token: string): bool =
+    ## Returns true when a websocket player token is configured.
+    token.strip().len > 0 or url.urlHasQueryParam("token")
+
+  proc printBedrockStartupStatus() =
+    ## Prints a redacted Bedrock startup diagnostic.
+    echo "notsus bedrock runtime: ", bedrockAi.runtimeText()
+    let signal = bedrockAi.credentialSignalText()
+    if signal.len == 0:
+      echo "NOTSUS BEDROCK CREDENTIALS MISSING: no AWS credential signal; ",
+        "voting LLM chat will not connect."
+      flushFile(stdout)
+      return
+    echo "notsus bedrock credential signal: source=", signal
+    try:
+      echo "notsus bedrock credentials resolved: ",
+        bedrockAi.resolvedCredentialText()
+    except CatchableError as e:
+      echo "NOTSUS BEDROCK CREDENTIAL ERROR: ", e.msg
+    try:
+      echo "notsus bedrock metadata keys: ",
+        bedrockAi.requestMetadataKeys()
+    except CatchableError as e:
+      echo "NOTSUS BEDROCK METADATA ERROR: ", e.msg
+    flushFile(stdout)
+
   proc runBot(
     host = DefaultHost,
     port = PlayerDefaultPort,
@@ -7343,6 +7388,7 @@ when not defined(italkalotLibrary):
       if url.len > 0: ensureWsPath(url, WebSocketPath)
       else: "ws://" & host & ":" & $port & WebSocketPath
     let connectUrl = playerConnectUrl(endpoint, name, token, slot)
+    let displayUrl = connectUrl.redactedTokenUrl()
     let client = initProtocolClient()
 
     proc closeConnection(ws: var WebSocket) =
@@ -7371,9 +7417,9 @@ when not defined(italkalotLibrary):
       var ws: WebSocket
       try:
         if everConnected or notifiedFailure:
-          echo "trying to reconnect to ", connectUrl
+          echo "trying to reconnect to ", displayUrl
         ws = newWebSocket(connectUrl)
-        echo "connected to ", connectUrl, " protocol=sprite"
+        echo "connected to ", displayUrl, " protocol=sprite"
         flushFile(stdout)
         notifiedFailure = false
         var
@@ -7513,6 +7559,7 @@ when isMainModule and not defined(italkalotLibrary):
       token: string
       slot: int
       exitOnDisconnect: bool
+      connectionMethod: string
 
   proc requireOptionValue(key, val: string) =
     ## Raises when one command-line option is missing its value.
@@ -7539,11 +7586,27 @@ when isMainModule and not defined(italkalotLibrary):
 
   proc readBotRunConfig(): BotRunConfig =
     ## Reads command-line options for one bot process.
+    let
+      coworldUrl = getEnv("COWORLD_PLAYER_WS_URL")
+      cogamesUrl = getEnv("COGAMES_ENGINE_WS_URL")
+      defaultUrl =
+        if coworldUrl.len > 0:
+          coworldUrl
+        else:
+          cogamesUrl
+      defaultMethod =
+        if coworldUrl.len > 0:
+          "COWORLD_PLAYER_WS_URL"
+        elif cogamesUrl.len > 0:
+          "COGAMES_ENGINE_WS_URL"
+        else:
+          "host-port"
     result = BotRunConfig(
-      url: getEnv("COWORLD_PLAYER_WS_URL", getEnv("COGAMES_ENGINE_WS_URL")),
+      url: defaultUrl,
       address: DefaultHost,
       port: PlayerDefaultPort,
-      slot: -1
+      slot: -1,
+      connectionMethod: defaultMethod
     )
     var
       addressSet = false
@@ -7565,6 +7628,7 @@ when isMainModule and not defined(italkalotLibrary):
           key.requireOptionValue(val)
           result.url = val
           urlSet = true
+          result.connectionMethod = "--url"
         of "name":
           key.requireOptionValue(val)
           result.name = val
@@ -7601,14 +7665,46 @@ when isMainModule and not defined(italkalotLibrary):
         discard
     if not urlSet and (addressSet or portSet):
       result.url = ""
+      result.connectionMethod = "host-port"
+
+  proc connectEndpoint(config: BotRunConfig): string =
+    ## Returns the websocket endpoint before player query parameters.
+    if config.url.len > 0:
+      ensureWsPath(config.url, WebSocketPath)
+    else:
+      "ws://" & config.address & ":" & $config.port & WebSocketPath
+
+  proc connectUrl(config: BotRunConfig): string =
+    ## Returns the full websocket player URL.
+    playerConnectUrl(
+      config.connectEndpoint(),
+      config.name,
+      config.token,
+      config.slot
+    )
+
+  proc requirePlayerToken(config: BotRunConfig, url: string) =
+    ## Exits loudly when a headless hosted run has no websocket token.
+    let hasToken = url.playerTokenPresent(config.token)
+    echo "notsus connection method: ", config.connectionMethod,
+      " protocol=sprite token=",
+      (if hasToken: "present" else: "MISSING"),
+      " slot=", (if config.slot >= 0: $config.slot else: "auto")
+    if hasToken:
+      flushFile(stdout)
+      return
+    echo "NOTSUS CONNECTION ERROR: missing websocket player token."
+    echo "NOTSUS CONNECTION ERROR: refusing to connect without token; ",
+      "pass --token or include token= in the websocket URL."
+    flushFile(stdout)
+    if not config.gui:
+      quit(2)
 
   let config = readBotRunConfig()
-  let target =
-    if config.url.len > 0:
-      config.url
-    else:
-      "ws://" & config.address & ":" & $config.port
-  echo "starting notsus -> ", target, " protocol=sprite"
+  let target = config.connectUrl()
+  echo "starting notsus -> ", target.redactedTokenUrl(), " protocol=sprite"
+  config.requirePlayerToken(target)
+  printBedrockStartupStatus()
   addExitProc(finishProfileTrace)
   runBot(
     config.address,

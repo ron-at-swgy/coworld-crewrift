@@ -125,6 +125,10 @@ proc bedrockUrl(): string =
   ## Returns the Bedrock Runtime Converse URL.
   "https://" & bedrockHost() & bedrockPath()
 
+proc runtimeText*(): string =
+  ## Returns the Bedrock request method and target model summary.
+  "method=converse-sigv4 model=" & model() & " region=" & region()
+
 proc intField(node: JsonNode, name: string): int =
   ## Reads one integer JSON field if present.
   if node.kind == JObject and node.hasKey(name):
@@ -320,6 +324,15 @@ proc credentialSignalText*(): string =
 proc hasAwsCredentialSignal*(): bool =
   ## Returns true if Bedrock is enabled or AWS credentials look available.
   credentialSignalText().len > 0
+
+proc resolvedCredentialText*(): string =
+  ## Resolves credentials and returns a redacted credential summary.
+  let credentials = resolveCredentials()
+  result = "source=" & credentials.source & " access_key=present"
+  if credentials.sessionToken.len > 0:
+    result.add " session_token=present"
+  else:
+    result.add " session_token=missing"
 
 proc canonicalHeaders(
   headers: openArray[(string, string)]
