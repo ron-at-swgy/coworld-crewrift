@@ -169,6 +169,7 @@ type
     request: string
     meta: string
     replays: string
+    logs: string
 
   PlayerSummary = object
     total: float
@@ -924,8 +925,10 @@ proc pathsFor(config: ToolConfig): RunPaths =
   result.request = result.root / "request.json"
   result.meta = result.root / "run.json"
   result.replays = result.root / "replays"
+  result.logs = result.root / "logs"
   createDir(result.root)
   createDir(result.replays)
+  createDir(result.logs)
 
 proc pathsForRoot(root: string): RunPaths =
   ## Returns report paths for an existing run directory.
@@ -933,7 +936,9 @@ proc pathsForRoot(root: string): RunPaths =
   result.request = root / "request.json"
   result.meta = root / "run.json"
   result.replays = root / "replays"
+  result.logs = root / "logs"
   createDir(result.replays)
+  createDir(result.logs)
 
 proc numberText(value: float, decimals = 2): string =
   ## Formats one floating-point value for tables and prose.
@@ -2199,6 +2204,10 @@ proc replayFileName(index: int): string =
   ## Returns the replay artifact file name for one game.
   "game-" & ($index).align(3, '0') & ".z"
 
+proc logFileName(gameIndex, slot: int): string =
+  ## Returns the player log artifact file name for one game and seat.
+  "game-" & ($gameIndex).align(3, '0') & "-" & slot.playerLetter() & ".txt"
+
 proc botVersion(label: string): int =
   ## Returns the trailing version number from a bot label.
   let marker = label.rfind(":v")
@@ -3015,7 +3024,8 @@ proc renderReplayHtml(
   episode: Episode,
   bots: openArray[BotRef],
   replayPath,
-  replayHref: string
+  replayHref: string,
+  logHrefs: openArray[string]
 ): string =
   ## Renders replay metadata and the extracted game event log.
   var labels: seq[string]
@@ -3047,7 +3057,7 @@ proc renderReplayHtml(
   result.add "</code></li>\n"
   result.add "</ul>\n"
   result.add "</section>\n"
-  result.add renderReplayHtmlForPath(replayPath, replayHref, labels)
+  result.add renderReplayHtmlForPath(replayPath, replayHref, labels, logHrefs)
 
 proc renderPendingHtml(episode: Episode, gameIndex = -1): string =
   ## Renders one episode page before a replay is available.
@@ -3077,6 +3087,20 @@ proc renderPendingHtml(episode: Episode, gameIndex = -1): string =
   result.add "</ul>\n"
   result.add "</section>\n"
 
+proc redactLogTokens(text: string): string =
+  ## Redacts websocket token query values from copied player logs.
+  const Prefix = "token="
+  var i = 0
+  while i < text.len:
+    if i + Prefix.len <= text.len and text[i ..< i + Prefix.len] == Prefix:
+      result.add Prefix & "<redacted>"
+      i += Prefix.len
+      while i < text.len and text[i] notin {'&', ' ', '\t', '\r', '\n'}:
+        inc i
+    else:
+      result.add text[i]
+      inc i
+
 proc downloadReplay(episode: Episode, path: string): string =
   ## Downloads one replay artifact and returns an error summary on failure.
   if episode.replayUrl.len == 0 or fileExists(path):
@@ -3103,6 +3127,49 @@ proc downloadReplay(episode: Episode, path: string): string =
     if fileExists(tmpPath):
       removeFile(tmpPath)
 
+proc downloadPlayerLog(
+  config: ToolConfig,
+  episode: Episode,
+  slot: int,
+  path: string
+): string =
+  ## Downloads one readable player log and returns an error summary on failure.
+  if episode.id.len == 0 or fileExists(path):
+    return
+  try:
+    let output = runCommand(
+      coworldCommand(config, ["episode-logs", episode.id, "--agent", $slot]),
+      workingDir = config.coworldDir
+    ).output
+    path.parentDir().createDir()
+    writeFile(path, output.redactLogTokens())
+  except CatchableError as e:
+    result = e.msg.shortCommandError()
+
+proc focusedLogHrefs(
+  config: ToolConfig,
+  paths: RunPaths,
+  episode: Episode,
+  gameIndex: int
+): seq[string] =
+  ## Downloads focused-player logs and returns per-seat hrefs that exist.
+  result = newSeq[string](config.bots.len)
+  let
+    groups = groupedBots(config.bots)
+    focusIndex = groups.focusGroupIndex()
+  if focusIndex < 0 or focusIndex >= groups.len:
+    return
+  for slot in groups[focusIndex].slots:
+    if slot < 0 or slot >= result.len:
+      continue
+    let
+      fileName = logFileName(gameIndex, slot)
+      path = paths.logs / fileName
+    if config.downloadReplays:
+      discard downloadPlayerLog(config, episode, slot, path)
+    if fileExists(path):
+      result[slot] = "logs/" & fileName
+
 proc fillReplayScores(
   episodes: var seq[Episode],
   paths: RunPaths,
@@ -3125,6 +3192,7 @@ proc renderGamePages(
     let
       replayPath = paths.replays / replayFileName(gameIndex)
       gamePath = paths.root / gameFileName(gameIndex)
+      logHrefs = focusedLogHrefs(config, paths, episode, gameIndex)
     var replayError = ""
     if config.downloadReplays:
       replayError = episode.downloadReplay(replayPath)
@@ -3140,7 +3208,8 @@ proc renderGamePages(
           episode,
           config.bots,
           replayPath,
-          "replays/" & replayFileName(gameIndex)
+          "replays/" & replayFileName(gameIndex),
+          logHrefs
         )
       except CatchableError as e:
         html.add renderPendingHtml(episode, gameIndex)

@@ -427,6 +427,12 @@ proc roleDisplay(role: string): string =
     return role
   "-"
 
+proc hasLogHrefs(logHrefs: openArray[string]): bool =
+  ## Returns true when any player log link is available.
+  for href in logHrefs:
+    if href.len > 0:
+      return true
+
 proc eventWhoHtml(event: ReplayEvent): string =
   ## Renders the actor cell for one replay event.
   case event.kind
@@ -548,14 +554,21 @@ proc renderSummaryHtml(summary: ReplaySummary): string =
   result.add "<li>Deaths or vote-outs: " & $summary.deaths & "</li>\n"
   result.add "</ul>\n"
 
-proc renderPlayersHtml(players: openArray[PlayerInfo]): string =
+proc renderPlayersHtml(
+  players: openArray[PlayerInfo],
+  logHrefs: openArray[string]
+): string =
   ## Renders replay players as HTML.
   if players.len == 0:
     return ""
+  let showLogs = logHrefs.hasLogHrefs()
   result.add "<section>\n"
   result.add "<h2>Players</h2>\n"
   result.add "<table class=\"report-table no-sort replay-players\">\n"
-  result.add "<thead><tr><th>Seat</th><th>Player</th><th>Role</th></tr>"
+  result.add "<thead><tr><th>Seat</th><th>Player</th><th>Role</th>"
+  if showLogs:
+    result.add "<th>Log</th>"
+  result.add "</tr>"
   result.add "</thead>\n"
   result.add "<tbody>\n"
   for slot, player in players:
@@ -565,7 +578,15 @@ proc renderPlayersHtml(players: openArray[PlayerInfo]): string =
     result.add player.label.playerChipHtml()
     result.add "</td><td class=\"role-col\">"
     result.add player.role.roleDisplay().htmlEscape()
-    result.add "</td></tr>\n"
+    result.add "</td>"
+    if showLogs:
+      result.add "<td class=\"log-col\">"
+      if slot >= 0 and slot < logHrefs.len and logHrefs[slot].len > 0:
+        result.add "<a href=\"" & logHrefs[slot].htmlEscape() & "\">log</a>"
+      else:
+        result.add "-"
+      result.add "</td>"
+    result.add "</tr>\n"
   result.add "</tbody></table>\n"
   result.add "</section>\n"
 
@@ -602,7 +623,8 @@ proc renderReplayHtmlForTimeline*(
   timeline: ReplayTimeline,
   source,
   replayHref: string,
-  labels: openArray[string]
+  labels,
+  logHrefs: openArray[string]
 ): string =
   ## Renders a replay timeline as Tufte-style HTML body sections.
   discard labels
@@ -624,8 +646,28 @@ proc renderReplayHtmlForTimeline*(
   result.add "</ul>\n"
   result.add summary.renderSummaryHtml()
   result.add "</section>\n"
-  result.add renderPlayersHtml(timeline.collectPlayers())
+  result.add renderPlayersHtml(timeline.collectPlayers(), logHrefs)
   result.add renderEventsHtml(timeline)
+
+proc renderReplayHtmlForTimeline*(
+  timeline: ReplayTimeline,
+  source,
+  replayHref: string,
+  labels: openArray[string]
+): string =
+  ## Renders a replay timeline as Tufte-style HTML body sections.
+  let logHrefs: seq[string] = @[]
+  renderReplayHtmlForTimeline(timeline, source, replayHref, labels, logHrefs)
+
+proc renderReplayHtmlForPath*(
+  path,
+  replayHref: string,
+  labels,
+  logHrefs: openArray[string]
+): string =
+  ## Loads one replay path and renders Tufte-style HTML body sections.
+  let timeline = expandReplayTimeline(loadReplay(path))
+  renderReplayHtmlForTimeline(timeline, path, replayHref, labels, logHrefs)
 
 proc renderReplayHtmlForPath*(
   path,
@@ -633,8 +675,8 @@ proc renderReplayHtmlForPath*(
   labels: openArray[string]
 ): string =
   ## Loads one replay path and renders Tufte-style HTML body sections.
-  let timeline = expandReplayTimeline(loadReplay(path))
-  renderReplayHtmlForTimeline(timeline, path, replayHref, labels)
+  let logHrefs: seq[string] = @[]
+  renderReplayHtmlForPath(path, replayHref, labels, logHrefs)
 
 proc replayExtractorCss*(): string =
   ## Returns optional CSS for replay extraction fragments.
@@ -646,6 +688,7 @@ proc replayExtractorCss*(): string =
   result.add "var(--failure-color, #f03b20); font-weight: 600; }\n"
   result.add "    .replay-players { max-width: 42rem; }\n"
   result.add "    .replay-players .role-col { width: 7rem; }\n"
+  result.add "    .replay-players .log-col { width: 4rem; }\n"
   result.add "    .crew-chip { display: inline-flex; align-items: center; "
   result.add "gap: 0.35rem; white-space: nowrap; }\n"
   result.add "    .crew-swatch { box-sizing: border-box; display: inline-block; "
