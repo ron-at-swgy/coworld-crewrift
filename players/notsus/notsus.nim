@@ -7354,6 +7354,12 @@ when not defined(italkalotLibrary):
       flushFile(stdout)
       return
     echo "notsus bedrock credential signal: source=", signal
+    if bedrockAi.sidecarConfigured():
+      try:
+        echo "notsus bedrock sidecar health: ",
+          bedrockAi.sidecarHealthText()
+      except CatchableError as e:
+        echo "NOTSUS BEDROCK SIDECAR HEALTH ERROR: ", e.msg
     try:
       echo "notsus bedrock credentials resolved: ",
         bedrockAi.resolvedCredentialText()

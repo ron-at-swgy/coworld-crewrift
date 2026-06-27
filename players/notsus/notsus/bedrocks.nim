@@ -6,6 +6,8 @@ import
 const
   BedrockVersion = "bedrock-2023-05-31"
   BedrockTransport = "invoke-model-sigv4"
+  SidecarTransport = "invoke-model-sidecar"
+  SidecarEndpointEnv = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"
   DefaultRegion = "us-east-1"
   DefaultModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   DefaultPlayerName = "notsus"
@@ -17,6 +19,7 @@ const
   BedrockTimeoutSeconds = 5.0'f32
   BedrockMaxTokens = 512
   BedrockTemperature = 0.2
+  MaxErrorBodyLen = 600
 
 type
   BedrockError = object of CatchableError
@@ -121,18 +124,65 @@ proc bedrockHost(): string =
   ## Returns the Bedrock Runtime host for the selected Region.
   "bedrock-runtime." & region() & ".amazonaws.com"
 
+proc endpointBase(): string =
+  ## Returns the runner Bedrock sidecar endpoint if configured.
+  getEnv(SidecarEndpointEnv).strip()
+
+proc hasSidecarEndpoint(): bool =
+  ## Returns true when the hosted Bedrock sidecar is configured.
+  endpointBase().len > 0
+
+proc sidecarConfigured*(): bool =
+  ## Returns true when Bedrock calls should go through the runner sidecar.
+  hasSidecarEndpoint()
+
 proc bedrockPath(): string =
   ## Returns the REST path for a Bedrock InvokeModel request.
   "/model/" & model().awsUriEncode() & "/invoke"
 
+proc joinUrl(base, path: string): string =
+  ## Joins one base URL and absolute path.
+  result = base.strip()
+  while result.endsWith("/"):
+    result.setLen(result.len - 1)
+  if path.len > 0 and not path.startsWith("/"):
+    result.add '/'
+  result.add path
+
 proc bedrockUrl(): string =
   ## Returns the Bedrock Runtime InvokeModel URL.
+  let endpoint = endpointBase()
+  if endpoint.len > 0:
+    return endpoint.joinUrl(bedrockPath())
   "https://" & bedrockHost() & bedrockPath()
 
 proc runtimeText*(): string =
   ## Returns the Bedrock request method and target model summary.
+  if hasSidecarEndpoint():
+    return "method=" & SidecarTransport & " model=" & model() &
+      " endpoint_env=" & SidecarEndpointEnv
   "method=" & BedrockTransport & " model=" & model() &
     " region=" & region()
+
+proc clippedBody(body: string): string =
+  ## Returns a compact single-line response body for diagnostics.
+  result = body.strip().replace("\n", " ")
+  if result.len > MaxErrorBodyLen:
+    result = result[0 ..< MaxErrorBodyLen] & "..."
+
+proc sidecarHealthText*(): string =
+  ## Returns the Bedrock sidecar health response summary.
+  if not hasSidecarEndpoint():
+    return "not-configured"
+  let response = curl.get(
+    endpointBase().joinUrl("/healthz"),
+    timeout = 1.0'f32
+  )
+  result = "http=" & $response.code
+  let body = response.body.clippedBody()
+  if body.len > 0:
+    result.add " body="
+    result.add body
 
 proc intField(node: JsonNode, name: string): int =
   ## Reads one integer JSON field if present.
@@ -165,13 +215,18 @@ proc requestMetadata(): JsonNode =
 
 proc requestMetadataKeys*(): string =
   ## Returns the metadata keys that will be sent with Bedrock requests.
+  if hasSidecarEndpoint():
+    return "sidecar-owned"
   let metadata = requestMetadata()
   for key in metadata.keys:
     if result.len > 0:
       result.add ","
     result.add key
 
-proc conversationBody(messages: openArray[ConversationMessage]): string =
+proc conversationBody(
+  messages: openArray[ConversationMessage],
+  includeMetadata: bool
+): string =
   ## Builds one Anthropic Bedrock InvokeModel JSON request body.
   var
     systemText = ""
@@ -193,7 +248,8 @@ proc conversationBody(messages: openArray[ConversationMessage]): string =
   if systemText.len > 0:
     root["system"] = %systemText
   root["messages"] = chat
-  root["requestMetadata"] = requestMetadata()
+  if includeMetadata:
+    root["requestMetadata"] = requestMetadata()
   $root
 
 proc xmlTag(body, name: string): string =
@@ -312,6 +368,8 @@ proc resolveCredentials(): AwsCredentials =
 
 proc credentialSignalText*(): string =
   ## Returns the first configured AWS credential source name.
+  if hasSidecarEndpoint():
+    return "sidecar-endpoint"
   if getEnv("AWS_ACCESS_KEY_ID").strip().len > 0 and
       getEnv("AWS_SECRET_ACCESS_KEY").strip().len > 0:
     return "env"
@@ -332,6 +390,8 @@ proc hasAwsCredentialSignal*(): bool =
 
 proc resolvedCredentialText*(): string =
   ## Resolves credentials and returns a redacted credential summary.
+  if hasSidecarEndpoint():
+    return "source=sidecar endpoint=present signing=runner"
   let credentials = resolveCredentials()
   result = "source=" & credentials.source & " access_key=present"
   if credentials.sessionToken.len > 0:
@@ -447,17 +507,33 @@ proc talkToAI*(messages: var seq[ConversationMessage]): string =
   lastUsage = ""
   lastError = ""
   try:
-    let
-      body = conversationBody(messages)
-      credentials = resolveCredentials()
-      response = curl.post(
-        bedrockUrl(),
-        signedHeaders(credentials, body, now().utc),
-        body,
-        timeout = BedrockTimeoutSeconds
-      )
+    let body = conversationBody(messages, not hasSidecarEndpoint())
+    let response =
+      if hasSidecarEndpoint():
+        curl.post(
+          bedrockUrl(),
+          @[
+            ("Content-Type", "application/json"),
+            ("Accept", "application/json")
+          ],
+          body,
+          timeout = BedrockTimeoutSeconds
+        )
+      else:
+        let credentials = resolveCredentials()
+        curl.post(
+          bedrockUrl(),
+          signedHeaders(credentials, body, now().utc),
+          body,
+          timeout = BedrockTimeoutSeconds
+        )
     if response.code != 200:
-      fail("Bedrock InvokeModel returned HTTP " & $response.code & ".")
+      var message = "Bedrock InvokeModel returned HTTP " & $response.code & "."
+      let body = response.body.clippedBody()
+      if body.len > 0:
+        message.add " Body: "
+        message.add body
+      fail(message)
     result = response.body.parseReply()
     messages.add ConversationMessage(role: "assistant", content: result)
   except CatchableError as error:
