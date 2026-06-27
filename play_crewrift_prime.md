@@ -1,7 +1,7 @@
 # Play Crewrift Prime — pick a default policy, deploy it, then optimize
 
 **You are the coding agent.** Your job: win the **Crewrift Prime** league for
-your human by **adopting one of the three default policies** shipped in
+your human by **adopting one of the two default policies** shipped in
 [`players/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players),
 **deploying it immediately**, and then improving it with the repo's tools.
 
@@ -12,14 +12,14 @@ your human by **adopting one of the three default policies** shipped in
 - New here? Read [`play.md`](./play.md) and the
   [game rules](https://github.com/Metta-AI/coworld-crewrift#crewrift-rules) first.
 
-This episode is built so you **never start from a blank file**. All three
+This episode is built so you **never start from a blank file**. Both default
 policies already connect, perceive the game, act every tick, cast legal votes,
 and exit cleanly on game over — i.e. each one is a **complete, submittable
 policy today**. You **choose one**, deploy it, and iterate.
 
 ---
 
-## The three default policies — which one to use
+## The two default policies — which one to use
 
 ### 1. `crewborg-aaln` — strongest scripted baseline + a full optimizer (default pick)
 
@@ -42,29 +42,7 @@ Crewrift game skills (`games/crewrift/skills/crewrift-optimization`,
   `suspicion` (Bayesian P(imposter)), `action`/`nav` (momentum + A\*). The
   optimizer's `guide/SKILL.md` has the precise "where to edit" map.
 
-### 2. `crewbot3000` — Cyborg brain + LLM-meeting seam + stage diagnosis
-
-[`players/crewbot3000/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players/crewbot3000) · Python (self-contained) · LLM optional, **off by default**
-
-A self-contained fork of the same Cyborg stack, repackaged to build from its own
-directory. Two things make it distinct:
-- A clean **LLM meeting seam** (`strategy/meeting/llm.py`): scripted baseline runs
-  with no key; set `CREWBOT3000_LLM_MEETINGS=1` + a backend (`ANTHROPIC_API_KEY`
-  or Bedrock) and an LLM drives meeting chat/voting behind a circuit breaker.
-- **Stage-tagged debug** (`stage_debug.py` → `CREWBOT3000_DEBUG` NDJSON) plus a
-  ready optimizer tool
-  [`scripts/diagnose_experience_request.py`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players/crewbot3000/scripts)
-  that digests an XP-request run into a stage-attributed `diagnosis.md` (localizes
-  a regression to one of the five cognitive stages).
-
-- **Use it when:** you want an **LLM that actually reasons and talks in meetings**
-  (Crewrift Prime's qualifier has a **talk gate** — silent policies don't
-  qualify), or you want stage-by-stage diagnosis to drive one-edit-per-candidate
-  optimization.
-- **Edit behavior in:** `strategy/meeting/` (LLM + chat), the imposter/crew
-  `modes/`, `strategy/suspicion`, `agent_tracking`.
-
-### 3. `notsus` — Nim reference bot
+### 2. `notsus` — Nim reference bot
 
 [`players/notsus/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players/notsus) · Nim · no LLM
 
@@ -80,8 +58,7 @@ things it does, and improve from there. It has a visual debugger
 - **Edit behavior in:** `players/notsus/notsus.nim` (one file).
 
 ### Quick chooser
-- Most competitive + a built-in optimizer loop → **`crewborg-aaln`**.
-- Want an LLM reasoning/talking in meetings → **`crewbot3000`**.
+- Most competitive + a built-in optimizer loop → **`crewborg-aaln`** (default).
 - Want Nim / engine-level work or a weak reference opponent → **`notsus`**.
 
 ---
@@ -94,9 +71,8 @@ Each policy is a self-contained Docker build context with a `coplayer_manifest.j
 **1. Build the image** (build context is the policy dir):
 
 ```sh
-# Python policies:
-docker build -t $POLICY:dev players/$POLICY            # crewborg-aaln
-docker build -t crewbot3000:dev players/crewbot3000    # crewbot3000 (or ./build.sh)
+# crewborg-aaln (Python):
+docker build -t crewborg-aaln:dev players/crewborg-aaln
 # notsus uses the public image public.ecr.aws/s3j4p9s7/treeform/players/notsus:latest
 ```
 
@@ -115,9 +91,6 @@ policy's `coplayer_manifest.json` (one `--run` flag per token); a missing/wrong
 # crewborg-aaln run argv:
 coworld upload-policy $POLICY:dev --name $POLICY \
   --run python -m players.crewrift.crewborg.coworld.policy_player
-# crewbot3000 run argv:
-#   --run python -m players.crewrift.crewbot3000.coworld.policy_player
-# (add --use-bedrock --bedrock-model <id> for an LLM policy)
 
 coworld submit $POLICY:v1 --league league_a12f5172-0907-4d04-8bcb-ca02f5360e3a \
   --auto-champion always --no-open-browser
@@ -132,7 +105,7 @@ then run your policy on a slot with `COWORLD_PLAYER_WS_URL=ws://127.0.0.1:2000/p
 
 ## Optimize it — the loop and the tools
 
-The improvement loop is **evidence-first** and identical for all three policies:
+The improvement loop is **evidence-first** and identical for both policies:
 
 ```
 setup → understand the policy → run hosted XP evals → mine replays/artifacts
@@ -181,12 +154,12 @@ The canonical write-up is
   episodes are worth opening.
   [`grader/graders/crewrift/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/grader/graders/crewrift)
 
-- **Per-policy diagnosis tools.** `crewbot3000` ships
-  `scripts/diagnose_experience_request.py` (stage-attributed `diagnosis.md` from
-  one XP request). `crewborg-aaln`'s optimizer ships the full skill library
-  (`hosted-xp-evals`, `replay-artifact-analysis`, `opponent-strategy-mining`,
-  `promotion-gate`, `eval-aggregation`, …) under
-  [`optimizer/skills/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players/crewborg-aaln/optimizer/skills).
+- **Per-policy diagnosis tools.** `crewborg-aaln`'s optimizer ships the full
+  skill library (`hosted-xp-evals`, `replay-artifact-analysis`,
+  `opponent-strategy-mining`, `promotion-gate`, `eval-aggregation`, …) under
+  [`optimizer/skills/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players/crewborg-aaln/optimizer/skills),
+  plus `crewborg-optimization/crewborg-suspicion-tuning` for fitting the
+  suspicion model from replays.
 
 ### Pull tournament replays to mine
 
@@ -198,7 +171,7 @@ coworld replays  --round round_... --mine --download-dir replays/
 nim r tools/expand_replay.nim replays/<downloaded-replay>
 ```
 
-That's the whole job: **adopt one of the three default policies, deploy it to
+That's the whole job: **adopt one of the two default policies, deploy it to
 Crewrift Prime immediately, then run the optimizer loop with these tools** —
 observe, evaluate, hypothesize, make one scoped edit, verify against the
 champion at the ~40-game floor, promote what wins — until it climbs the

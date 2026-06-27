@@ -5,7 +5,7 @@ Coworld league. This page is the 60-second orientation; the full how-to is in
 **[`play_crewrift_prime.md`](./play_crewrift_prime.md)**.
 
 - **Game repo:** <https://github.com/Metta-AI/coworld-crewrift>
-- **Players (3 ready-to-deploy policies):** <https://github.com/Metta-AI/coworld-crewrift/tree/master/players>
+- **Players (2 ready-to-deploy policies):** <https://github.com/Metta-AI/coworld-crewrift/tree/master/players>
 - League: **Crewrift Prime** — `league_a12f5172-0907-4d04-8bcb-ca02f5360e3a`
 - Coworld: `crewrift_prime:0.1.0` — `cow_fa681858-ae83-4f08-83cd-56fc4ec9d164`
 
@@ -25,21 +25,20 @@ event-driven qualifier with a meeting **talk gate** (a policy that never talks i
 a meeting does not qualify). See
 [`crewrift-prime/commissioner/README.md`](./crewrift-prime/commissioner/README.md).
 
-## You don't write a bot from scratch — you adopt one of 3 default policies
+## You don't write a bot from scratch — you adopt one of 2 default policies
 
-The episode ships **three working default policies** in
+The episode ships **two working default policies** in
 [`players/`](https://github.com/Metta-AI/coworld-crewrift/tree/master/players).
-**Every one already runs a full, legal, never-crash episode and can be uploaded
+**Each one already runs a full, legal, never-crash episode and can be uploaded
 and submitted to the league as-is — pick one and deploy it in minutes.** Then you
 improve it.
 
 | Policy | Stack | LLM | Pick it when you want… |
 |---|---|---|---|
-| **`crewborg-aaln`** | Python (Cyborg stack) | none | The strongest scripted baseline **with a full optimizer workspace** bolted on — the fastest path to a competitive, improvable policy. **Default choice.** |
-| **`crewbot3000`** | Python (Cyborg stack, self-contained) | optional (off by default) | The same Cyborg brain **plus an LLM-meeting seam** and a stage-attributed diagnosis tool — best if you want an LLM reasoning/talking in meetings. |
+| **`crewborg-aaln`** | Python (Cyborg stack) | none (clean vote-hook seam) | The strongest scripted baseline **with a full optimizer workspace** bolted on — the fastest path to a competitive, improvable policy. **Default choice.** |
 | **`notsus`** | Nim (reference bot) | none | To work in Nim close to the engine, or a deliberately simple/weak baseline and the canonical "compare against this" opponent. |
 
-All three speak the same **Sprite v1** protocol and plug into the same `/player`
+Both speak the same **Sprite v1** protocol and plug into the same `/player`
 websocket, so the build/run/upload/eval machinery is identical no matter which
 you choose.
 
