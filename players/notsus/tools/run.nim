@@ -127,12 +127,15 @@ type
     error: string
     scores: seq[Score]
     seatScores: seq[SeatScore]
+    excluded: bool
+    exclusionReason: string
 
   Summary = object
     completed: int
     failed: int
     running: int
     pending: int
+    excluded: int
     wins: int
     losses: int
     ties: int
@@ -1050,6 +1053,13 @@ proc numberField(node: JsonNode, key: string, fallback = 0.0): float =
   else:
     fallback
 
+proc boolField(node: JsonNode, key: string, fallback = false): bool =
+  ## Returns a boolean field or a fallback value.
+  let child = node.field(key)
+  if child.kind == JBool:
+    return child.getBool()
+  fallback
+
 proc scoreValue(node: JsonNode): float =
   ## Returns a score value from either a number or score object.
   case node.kind
@@ -1478,9 +1488,28 @@ proc parseScores(row: JsonNode): seq[Score] =
     else:
       result.add Score(score: item.scoreValue())
 
+proc markExcluded(episode: var Episode, reason: string) =
+  ## Marks one episode as excluded from score analysis.
+  if reason.len == 0:
+    return
+  episode.excluded = true
+  if episode.exclusionReason.len == 0:
+    episode.exclusionReason = reason
+
+proc statusExclusionReason(episode: Episode): string =
+  ## Returns the hosted-status reason for excluding one episode.
+  if episode.errorType.len > 0:
+    return episode.errorType
+  if episode.error.len > 0:
+    return episode.error
+  if episode.status == "failed":
+    return "episode failed"
+  if episode.status in ["cancelled", "crashed", "error"]:
+    return "episode " & episode.status
+
 proc parseEpisode(index: int, row: JsonNode): Episode =
   ## Parses one episode row from Coworld JSON.
-  Episode(
+  result = Episode(
     index: index,
     id: row.strField("id"),
     status: row.strField("status"),
@@ -1491,6 +1520,7 @@ proc parseEpisode(index: int, row: JsonNode): Episode =
     error: row.strField("error"),
     scores: parseScores(row)
   )
+  result.markExcluded(result.statusExclusionReason())
 
 proc parseEpisodes(detail: JsonNode): seq[Episode] =
   ## Parses all episodes from a request detail node.
@@ -1556,6 +1586,8 @@ proc playerSummaries(
   ## Summarizes average score and record for every roster slot.
   result = newSeq[PlayerSummary](bots.len)
   for episode in episodes:
+    if episode.excluded:
+      continue
     var
       complete = true
       best = -1.0e300
@@ -1595,6 +1627,8 @@ proc groupSummaries(
   ## Summarizes average score and record for every unique bot group.
   result = newSeq[PlayerSummary](groups.len)
   for episode in episodes:
+    if episode.excluded:
+      continue
     var
       complete = true
       best = -1.0e300
@@ -1632,6 +1666,8 @@ proc winnerGroups(
   groups: openArray[BotGroup]
 ): seq[int] =
   ## Returns every bot group tied for the highest score.
+  if episode.excluded:
+    return @[]
   var best = -1.0e300
   for i in 0 ..< groups.len:
     let score = episode.scoreForGroup(groups, i)
@@ -1645,6 +1681,8 @@ proc winnerGroups(
 
 proc winnerSlots(episode: Episode, bots: openArray[BotRef]): seq[int] =
   ## Returns every slot tied for the highest score.
+  if episode.excluded:
+    return @[]
   var best = -1.0e300
   for i in 0 ..< bots.len:
     let score = episode.scoreForSlot(i)
@@ -1700,6 +1738,10 @@ proc summaryFor(
     else:
       inc result.pending
 
+    if episode.excluded:
+      inc result.excluded
+      continue
+
     if groups.len >= 2:
       let a = episode.scoreForGroup(groups, 0)
       if a.found:
@@ -1728,6 +1770,10 @@ proc summaryFor(
     result.avgA = result.totalA / scored.float
     result.avgB = result.totalB / scored.float
     result.avgMargin = result.margin / scored.float
+
+proc scoredGames(summary: Summary): int =
+  ## Returns games that counted in score summaries.
+  summary.wins + summary.losses + summary.ties
 
 proc shortId(value: string): string =
   ## Returns a compact identifier for terminal tables.
@@ -1803,6 +1849,7 @@ proc printTable(episodes: openArray[Episode], bots: openArray[BotRef]) =
       " vs " & focus.opponentLabel & "=" &
       numberText(focus.opponentAvg, 2) &
       " avg_margin=" & numberText(focus.avgMargin, 2) &
+      " excluded=" & $summary.excluded &
       " players=[" & scoreText.join(", ") & "]"
   else:
     echo "slot0 wins=" & $summary.wins &
@@ -1811,6 +1858,7 @@ proc printTable(episodes: openArray[Episode], bots: openArray[BotRef]) =
       " avg=" & numberText(summary.avgA, 2) &
       " vs best_opponent=" & numberText(summary.avgB, 2) &
       " avg_margin=" & numberText(summary.avgMargin, 2) &
+      " excluded=" & $summary.excluded &
       " players=[" & scoreText.join(", ") & "]"
 
 proc copyAssets(outDir, tufteDir: string) =
@@ -1880,10 +1928,13 @@ proc pageStart(title, cssHref: string): string =
   result.add "    table:not(.no-sort) th.sort-active { font-weight: 700; }\n"
   result.add "    .result-win { color: #b00000; font-weight: 700; }\n"
   result.add "    .games-table { table-layout: fixed; width: 100%; }\n"
-  result.add "    .games-table .game-col { width: 9rem; }\n"
+  result.add "    .games-table .game-col { width: 11rem; }\n"
+  result.add "    .games-table .side-col { width: 5rem; }\n"
+  result.add "    .games-table .score-col { width: 5rem; }\n"
   result.add "    .games-table .seat-name-col { width: 2.2rem; }\n"
   result.add "    .games-table .seat-score-col { width: 3.8rem; }\n"
   result.add "    .games-table .result-col { width: 4rem; }\n"
+  result.add "    .games-table .reason-col { width: 11rem; }\n"
   result.add "    .games-table th, .games-table td { "
   result.add "padding-right: 0.45rem; white-space: nowrap; }\n"
   result.add "    .games-table .seat-score-cell { font-variant-numeric: "
@@ -1894,6 +1945,12 @@ proc pageStart(title, cssHref: string): string =
   result.add "    .games-table .clip-cell a { display: block; "
   result.add "overflow: hidden; text-overflow: ellipsis; "
   result.add "white-space: nowrap; }\n"
+  result.add "    .games-table tr.excluded-game td:not(.reason-cell) { "
+  result.add "color: #777; text-decoration: line-through; }\n"
+  result.add "    .games-table tr.excluded-game .reason-cell { "
+  result.add "color: #777; font-style: italic; text-decoration: none; }\n"
+  result.add "    .games-table .reason-cell { overflow: hidden; "
+  result.add "text-overflow: ellipsis; }\n"
   result.add "    .runs-index .bot-name { display: block; "
   result.add "max-width: 100%; overflow: hidden; text-overflow: ellipsis; "
   result.add "white-space: nowrap; }\n"
@@ -2159,6 +2216,7 @@ proc runMetaJson(
       detail.intField("episode_count")
     else:
       episodes.len
+  let scored = summary.scoredGames()
   result = newJObject()
   result["run_number"] = %runNo
   result["name"] = %config.name
@@ -2176,10 +2234,12 @@ proc runMetaJson(
   result["failed"] = %summary.failed
   result["running"] = %summary.running
   result["pending"] = %summary.pending
+  result["excluded"] = %summary.excluded
+  result["valid_games"] = %scored
   result["wins"] = %summary.wins
   result["losses"] = %summary.losses
   result["ties"] = %summary.ties
-  result["win_rate"] = %winRate(summary.wins, gameCount)
+  result["win_rate"] = %winRate(summary.wins, scored)
   result["avg_a"] = %summary.avgA
   result["avg_b"] = %summary.avgB
   result["avg_margin"] = %summary.avgMargin
@@ -2202,11 +2262,14 @@ proc runMetaJson(
       "live_url": episode.liveUrl,
       "error_type": episode.errorType,
       "error": episode.error,
+      "excluded": episode.excluded,
+      "exclusion_reason": episode.exclusionReason,
       "winner": episode.winnerText(config.bots)
     }
-    let scores = episode.episodeScoresJson(config.bots)
-    if scores.len > 0:
-      row["scores"] = scores
+    if not episode.excluded:
+      let scores = episode.episodeScoresJson(config.bots)
+      if scores.len > 0:
+        row["scores"] = scores
     result["episodes"].add row
 
 proc writeRunMeta(
@@ -2409,6 +2472,8 @@ proc focusSummaryFor(
     total = 0.0
     opponentTotal = 0.0
   for episode in episodes:
+    if episode.excluded:
+      continue
     let focusScore = episode.scoreForGroup(groups, focusIndex)
     if not focusScore.found:
       continue
@@ -2481,6 +2546,8 @@ proc focusSummaryFor(meta: JsonNode): RunFocus =
     total = 0.0
     opponentTotal = 0.0
   for episode in meta.arrayField("episodes"):
+    if episode.boolField("excluded"):
+      continue
     let scores = episode.arrayField("scores")
     if focusIndex >= scores.len or not scores[focusIndex].hasScoreValue():
       continue
@@ -2707,6 +2774,8 @@ proc addEpisodeScorePoints(
     return false
   let label = botGroups[focusIndex].focusDisplayLabel()
   for episode in meta.arrayField("episodes"):
+    if episode.boolField("excluded"):
+      continue
     let scores = episode.arrayField("scores")
     if focusIndex >= scores.len or not scores[focusIndex].hasScoreValue():
       continue
@@ -2874,11 +2943,10 @@ proc writeMainIndex(config: ToolConfig) =
   html.add "<colgroup><col class=\"number-col\"><col class=\"name-col\">"
   html.add "<col class=\"score-col\"><col class=\"name-col\">"
   html.add "<col class=\"score-col\"><col class=\"win-col\">"
-  html.add "<col class=\"count-col\">"
   html.add "<col class=\"count-col\"><col class=\"time-col\"></colgroup>\n"
   html.add "<thead><tr><th>#</th><th>Player</th><th>Avg</th>"
   html.add "<th>Best Opp</th><th>Avg</th><th>Win%</th>"
-  html.add "<th>Completed</th><th>Games</th><th>Run time</th>"
+  html.add "<th>Games</th><th>Run time</th>"
   html.add "</tr></thead>\n<tbody>\n"
   for i, meta in metas:
     let
@@ -2894,7 +2962,12 @@ proc writeMainIndex(config: ToolConfig) =
       wins = focus.wins
       scored = focus.scored
       games = meta.intField("games")
-      completed = meta.intField("completed")
+      valid = meta.intField("valid_games", scored)
+      gamesDisplay =
+        if games > 0 and valid != games:
+          $valid & "/" & $games
+        else:
+          $games
       rate = winRate(wins, scored)
       rateText = rate.winRateText()
       durationSeconds = meta.numberField("duration_seconds", -1.0)
@@ -2924,12 +2997,7 @@ proc writeMainIndex(config: ToolConfig) =
       numberText(rate, 6)
     )
     html.add tableHtmlClassSort(
-      $completed,
-      "count-cell",
-      $completed
-    )
-    html.add tableHtmlClassSort(
-      $games,
+      gamesDisplay,
       "count-cell",
       $games
     )
@@ -2969,6 +3037,18 @@ proc seatsText(slots: openArray[int]): string =
     inc i
   parts.join(", ")
 
+proc gameRowClass(episode: Episode): string =
+  ## Returns the CSS class for one game row.
+  if episode.excluded:
+    return " class=\"excluded-game\""
+  ""
+
+proc exclusionCell(episode: Episode): string =
+  ## Renders the exclusion note for one game row.
+  if episode.excluded:
+    return episode.exclusionReason.tableHtmlClass("reason-cell")
+  "-".tableHtmlClass("reason-cell")
+
 proc seatScoreCellsHtml(
   episode: Episode,
   groups: openArray[BotGroup],
@@ -3004,6 +3084,11 @@ proc renderRunIndex(
     summary = summaryFor(episodes, config.bots)
     groupStats = groupSummaries(episodes, groups)
     focus = focusSummaryFor(episodes, groups)
+    validGames =
+      if focus.scored > 0:
+        focus.scored
+      else:
+        summary.scoredGames()
     firstLabel =
       if focus.abbr.len > 0:
         focus.abbr
@@ -3023,7 +3108,9 @@ proc renderRunIndex(
   html.add ".</p>\n"
   html.add "<ul>\n"
   html.add "<li>Status: " & detail.strField("status").htmlEscape() & "</li>\n"
-  html.add "<li>Games: " & $episodes.len & "</li>\n"
+  html.add "<li>Games: " & $episodes.len & " total, "
+  html.add $validGames & " valid, " & $summary.excluded
+  html.add " excluded</li>\n"
   html.add "<li>" & firstLabel.htmlEscape()
   html.add " record versus best opponent: "
   if focus.scored > 0:
@@ -3071,11 +3158,13 @@ proc renderRunIndex(
   for i in 0 ..< config.bots.len:
     html.add "<col class=\"seat-name-col\">"
     html.add "<col class=\"seat-score-col\">"
+  html.add "<col class=\"reason-col\">"
   html.add "</colgroup>\n"
   html.add "<thead><tr><th>Game</th>"
   for i in 0 ..< config.bots.len:
     html.add "<th>" & i.playerLetter().htmlEscape() & "</th>"
     html.add "<th></th>"
+  html.add "<th>Note</th>"
   html.add "</tr></thead>\n<tbody>\n"
   for episode in episodes:
     let gameLabel =
@@ -3083,7 +3172,7 @@ proc renderRunIndex(
         episode.id.shortId()
       else:
         $episode.index
-    html.add "<tr>"
+    html.add "<tr" & episode.gameRowClass() & ">"
     html.add clipHtmlCell(
       linkHtml(gameFileName(episode.index), gameLabel),
       gameLabel,
@@ -3092,6 +3181,7 @@ proc renderRunIndex(
     let winners = episode.winnerGroups(groups)
     for i in 0 ..< config.bots.len:
       html.add episode.seatScoreCellsHtml(groups, i, winners)
+    html.add episode.exclusionCell()
     html.add "</tr>\n"
   html.add "</tbody></table>\n"
   html.add "</section>\n"
@@ -3099,7 +3189,7 @@ proc renderRunIndex(
   writeFile(paths.root / "index.html", html)
 
 proc renderReplayHtml(
-  episode: Episode,
+  episode: var Episode,
   bots: openArray[BotRef],
   replayPath,
   replayHref: string,
@@ -3109,6 +3199,15 @@ proc renderReplayHtml(
   var labels: seq[string]
   for bot in bots:
     labels.add bot.label
+  let rendered = renderReplayBodyForPath(
+    replayPath,
+    replayHref,
+    labels,
+    logHrefs,
+    bots.len
+  )
+  if not rendered.quality.valid:
+    episode.markExcluded(rendered.quality.reason)
   result.add "<section>\n"
   result.add "<h1>Crewrift Prime Game " & $episode.index & "</h1>\n"
   result.add "<ul>\n"
@@ -3123,6 +3222,11 @@ proc renderReplayHtml(
   result.add replayHref.htmlEscape()
   result.add "\">download</a></li>\n"
   result.add "<li>Status: " & episode.status.htmlEscape() & "</li>\n"
+  if episode.excluded:
+    result.add "<li>Analysis: excluded"
+    if episode.exclusionReason.len > 0:
+      result.add " - " & episode.exclusionReason.htmlEscape()
+    result.add "</li>\n"
   if episode.liveUrl.len > 0:
     result.add "<li><a href=\"" & episode.liveUrl.htmlEscape()
     result.add "\">Live view</a></li>\n"
@@ -3130,7 +3234,7 @@ proc renderReplayHtml(
     result.add "<li>Error: " & episode.error.htmlEscape() & "</li>\n"
   result.add "</ul>\n"
   result.add "</section>\n"
-  result.add renderReplayHtmlForPath(replayPath, replayHref, labels, logHrefs)
+  result.add rendered.html
 
 proc renderPendingHtml(episode: Episode, gameIndex = -1): string =
   ## Renders one episode page before a replay is available.
@@ -3154,6 +3258,11 @@ proc renderPendingHtml(episode: Episode, gameIndex = -1): string =
     result.add episode.replayUrl.htmlEscape()
     result.add "\">download</a></li>\n"
   result.add "<li>Status: " & episode.status.htmlEscape() & "</li>\n"
+  if episode.excluded:
+    result.add "<li>Analysis: excluded"
+    if episode.exclusionReason.len > 0:
+      result.add " - " & episode.exclusionReason.htmlEscape()
+    result.add "</li>\n"
   if episode.liveUrl.len > 0:
     result.add "<li><a href=\"" & episode.liveUrl.htmlEscape()
     result.add "\">Live view</a></li>\n"
@@ -3258,11 +3367,11 @@ proc fillReplayScores(
 proc renderGamePages(
   config: ToolConfig,
   paths: RunPaths,
-  episodes: openArray[Episode],
+  episodes: var seq[Episode],
   gameOffset = 0
 ) =
   ## Writes one static HTML page for every hosted game.
-  for episode in episodes:
+  for episode in episodes.mitems:
     let gameIndex = gameOffset + episode.index
     let
       replayPath = paths.replays / replayFileName(gameIndex)
@@ -3287,6 +3396,7 @@ proc renderGamePages(
           logHrefs
         )
       except CatchableError as e:
+        episode.markExcluded("replay parse error: " & e.msg.shortCommandError())
         html.add renderPendingHtml(episode, gameIndex)
         html.add "<section><h2>Replay parse error</h2><p>"
         html.add e.msg.htmlEscape() & "</p></section>\n"
@@ -3590,6 +3700,14 @@ proc versusSideText(side: VersusSide): string =
   of OpponentImposters:
     "opponent imposters"
 
+proc versusSideRoleText(side: VersusSide): string =
+  ## Returns the candidate role label for one versus half.
+  case side
+  of CandidateImposters:
+    "imposter"
+  of OpponentImposters:
+    "crew"
+
 proc versusRequestFileName(side: VersusSide): string =
   ## Returns the request JSON filename for one versus half.
   case side
@@ -3692,6 +3810,18 @@ proc offsetEpisodes(
     var item = episode
     item.index = episode.index + offset
     result.add item
+
+proc episodesForSegment(
+  episodes: openArray[Episode],
+  segment: VersusSegment
+): seq[Episode] =
+  ## Returns aggregate episode rows that belong to one versus segment.
+  let
+    first = segment.gameOffset + 1
+    last = segment.gameOffset + segment.config.games
+  for episode in episodes:
+    if episode.index >= first and episode.index <= last:
+      result.add episode
 
 proc requestsTerminal(segments: openArray[VersusSegment]): bool =
   ## Returns true when every versus request has reached a terminal state.
@@ -3829,6 +3959,7 @@ proc renderVersusIndex(
     groups = groupedBots(config.bots)
     focusIndex = config.configuredFocusIndex(groups)
     focus = episodes.focusSummaryFor(groups, focusIndex)
+    summary = summaryFor(episodes, config.bots)
     candidateLabel = botTitle(config.bots[0])
     opponentLabel = botTitle(config.bots[1])
     status = combinedStatus(segments)
@@ -3839,7 +3970,9 @@ proc renderVersusIndex(
   html.add "<p>Versus run <b>" & $runNo & "</b>.</p>\n"
   html.add "<ul>\n"
   html.add "<li>Status: " & status.htmlEscape() & "</li>\n"
-  html.add "<li>Games: " & $episodes.len & "</li>\n"
+  html.add "<li>Games: " & $episodes.len & " total, "
+  html.add $focus.scored & " valid, " & $summary.excluded
+  html.add " excluded</li>\n"
   html.add "<li>" & candidateLabel.htmlEscape() & " record: "
   html.add $focus.wins & "-" & $focus.losses & "-" & $focus.ties
   html.add "</li>\n"
@@ -3867,7 +4000,7 @@ proc renderVersusIndex(
     html.add "<tr>"
     html.add linkHtml(
       softmaxDetailUrl("experience-request", id),
-      segment.label
+      segment.side.versusSideRoleText()
     ).tableHtmlClass("name-cell")
     html.add ($segment.config.games).tableCell(numeric = true)
     html.add segment.detail.strField("status").tableCell()
@@ -3875,63 +4008,80 @@ proc renderVersusIndex(
     html.add "</tr>\n"
   html.add "</tbody></table>\n"
   html.add "<table class=\"wide no-sort name-key\">\n"
-  html.add "<thead><tr><th>Side</th><th>Games</th>"
+  html.add "<thead><tr><th>Side</th><th>Games</th><th>Valid</th>"
+  html.add "<th>Excluded</th>"
   html.add "<th>" & candidateLabel.htmlEscape() & "</th>"
   html.add "<th>" & opponentLabel.htmlEscape() & "</th>"
   html.add "<th>Margin</th></tr></thead>\n"
   html.add "<tbody>\n"
   for segment in segments:
     let
-      segmentEpisodes = parseEpisodes(segment.detail)
+      segmentEpisodes = episodes.episodesForSegment(segment)
       segmentFocus = segmentEpisodes.focusSummaryFor(groups, focusIndex)
+      segmentSummary = segmentEpisodes.summaryFor(config.bots)
     html.add "<tr>"
-    html.add segment.label.tableCell()
+    html.add segment.side.versusSideRoleText().tableCell()
     html.add ($segmentEpisodes.len).tableCell(numeric = true)
+    html.add ($segmentFocus.scored).tableCell(numeric = true)
+    html.add ($segmentSummary.excluded).tableCell(numeric = true)
     html.add numberText(segmentFocus.avg, 2).tableCell(numeric = true)
     html.add numberText(segmentFocus.opponentAvg, 2).tableCell(numeric = true)
     html.add numberText(segmentFocus.avgMargin, 2).tableCell(numeric = true)
     html.add "</tr>\n"
   html.add "</tbody></table>\n"
   html.add "<table class=\"wide games-table\">\n"
-  html.add "<colgroup><col class=\"game-col\"><col class=\"name-col\">"
-  html.add "<col class=\"game-col\"><col class=\"score-col\">"
-  html.add "<col class=\"score-col\"><col class=\"name-col\"></colgroup>\n"
-  html.add "<thead><tr><th>Game</th><th>Side</th><th>Episode</th>"
+  html.add "<colgroup><col class=\"game-col\"><col class=\"side-col\">"
+  html.add "<col class=\"score-col\"><col class=\"score-col\">"
+  html.add "<col class=\"name-col\">"
+  html.add "<col class=\"reason-col\"></colgroup>\n"
+  html.add "<thead><tr><th>Game</th><th>Side</th>"
   html.add "<th>" & candidateLabel.htmlEscape() & "</th>"
   html.add "<th>" & opponentLabel.htmlEscape() & "</th>"
-  html.add "<th>Winner</th></tr></thead>\n<tbody>\n"
+  html.add "<th>Winner</th><th>Note</th></tr></thead>\n<tbody>\n"
   for segment in segments:
-    let segmentEpisodes = parseEpisodes(segment.detail)
+    let segmentEpisodes = episodes.episodesForSegment(segment)
     for episode in segmentEpisodes:
       let
-        gameIndex = segment.gameOffset + episode.index
+        gameIndex = episode.index
         candidateScore = episode.scoreForGroup(groups, 0)
         opponentScore = episode.scoreForGroup(groups, 1)
-        candidateWon = candidateScore.found and opponentScore.found and
+        candidateWon = not episode.excluded and candidateScore.found and
+          opponentScore.found and
           candidateScore.score > opponentScore.score + ScoreEpsilon
-        opponentWon = candidateScore.found and opponentScore.found and
+        opponentWon = not episode.excluded and candidateScore.found and
+          opponentScore.found and
           opponentScore.score > candidateScore.score + ScoreEpsilon
-        gameLabel =
+        gameText =
           if episode.id.len > 0:
-            episode.id.shortId()
+            episode.id.shortId() & " #" & $gameIndex
           else:
             $gameIndex
-        winner = versusWinnerText(
-          candidateScore,
-          opponentScore,
-          candidateLabel,
-          opponentLabel
-        )
-      html.add "<tr>"
-      html.add linkHtml(
-        gameFileName(gameIndex),
-        $gameIndex
-      ).tableHtmlClass("game-cell")
-      html.add segment.label.tableCell()
-      html.add gameLabel.tableCell()
+        gameTitle =
+          if episode.id.len > 0:
+            episode.id & " game " & $gameIndex
+          else:
+            "game " & $gameIndex
+        winner =
+          if episode.excluded:
+            "-"
+          else:
+            versusWinnerText(
+              candidateScore,
+              opponentScore,
+              candidateLabel,
+              opponentLabel
+            )
+      html.add "<tr" & episode.gameRowClass() & ">"
+      html.add clipHtmlCell(
+        linkHtml(gameFileName(gameIndex), gameText),
+        gameTitle,
+        "game-cell"
+      )
+      html.add segment.side.versusSideRoleText().tableCell()
       html.add candidateScore.versusScoreCell(candidateWon)
       html.add opponentScore.versusScoreCell(opponentWon)
       html.add winner.tableCell()
+      html.add episode.exclusionCell()
       html.add "</tr>\n"
   html.add "</tbody></table>\n"
   html.add "</section>\n"
@@ -4034,7 +4184,9 @@ proc printVersusTable(
   let groups = groupedBots(bots)
   if groups.len < 2:
     return
-  let focus = episodes.focusSummaryFor(groups, 0)
+  let
+    focus = episodes.focusSummaryFor(groups, 0)
+    summary = episodes.summaryFor(bots)
   echo "versus " & botTitle(bots[0]) &
     " wins=" & $focus.wins &
     " losses=" & $focus.losses &
@@ -4042,7 +4194,8 @@ proc printVersusTable(
     " avg=" & numberText(focus.avg, 2) &
     " vs " & botTitle(bots[1]) & "=" &
     numberText(focus.opponentAvg, 2) &
-    " avg_margin=" & numberText(focus.avgMargin, 2)
+    " avg_margin=" & numberText(focus.avgMargin, 2) &
+    " excluded=" & $summary.excluded
 
 proc runVersus(initialConfig: ToolConfig) =
   ## Runs direct two-policy versus mode.
