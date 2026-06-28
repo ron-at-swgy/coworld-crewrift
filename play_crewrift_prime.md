@@ -1,17 +1,26 @@
 # Play Crewrift Prime fast path
 
-**You are the coding agent.** Your job is to get your human a real Crewrift
-Prime policy quickly, then improve it with evidence. Do **not** create a new bot
-from scratch unless the human explicitly asks for that.
+**You are the coding agent.** Your job is to help your human get a real Crewrift
+Prime policy and improve it with evidence. You build, upload, evaluate, and improve;
+**the human drives submission to the league.** Submitting is the irreversible,
+champion-making action — you prepare the candidate and the evidence and surface it, but
+the human decides when to submit. Do **not** create a new bot from scratch, and do **not**
+submit on your own initiative, unless the human explicitly asks.
 
 The fast path is:
 
 ```
 choose crewborg, crewborg-aaln, or notsus -> build -> upload with explicit run argv
-    -> submit -> confirm qualification -> run small hosted evals
+    -> human submits to enter -> confirm qualification -> run small hosted evals
     -> make one scoped change -> verify over enough completed games
-    -> submit the winner
+    -> human submits the winner
 ```
+
+> **Ultimate authority:** the optimizer for whichever policy you adopt — its `AGENTS.md` /
+> `README.md` (e.g. [`players/crewborg/AGENTS.md`](./players/crewborg/AGENTS.md),
+> [`players/crewborg-aaln/optimizer/AGENTS.md`](./players/crewborg-aaln/optimizer/AGENTS.md)) — is
+> the final word on the operating model, **including who submits and when.** Read it as soon as you
+> pick a policy; where it and this file disagree, follow it.
 
 Commands below use `coworld` on PATH. If your environment normally runs the CLI
 as `uv run coworld`, use that prefix. Do not move into an older `coworld-player`
@@ -58,8 +67,8 @@ Read [`README.md`](./README.md#crewrift-rules) only when changing game strategy.
 
 ## Choose the starting policy
 
-The three shipped policies are all viable bases. Pick one deliberately, then submit it
-before doing deeper research.
+The three shipped policies are all viable bases. Pick one deliberately, then get it into the
+league early — build, upload, and let the human submit — before sinking time into deeper research.
 
 ### `crewborg` - shared lineage, human-driven, with an LLM gameplay commander
 
@@ -123,7 +132,9 @@ Do not port old code from another checkout while these two bases exist.
 
 ## First submission, copy-paste paths
 
-Run from the repo root.
+These are the build → upload → submit commands. **The `coworld submit` step is the human's
+call** — run it at the human's direction, not on your own; build and upload are yours. Run from
+the repo root.
 
 ```sh
 export LEAGUE_ID=league_a12f5172-0907-4d04-8bcb-ca02f5360e3a
@@ -279,7 +290,7 @@ Then run this loop:
 read live standings/submissions -> inspect recent evals/replays/artifacts
   -> write one falsifiable hypothesis -> make one small edit or flag flip
   -> build/upload candidate -> evaluate in small hosted batches
-  -> aggregate by role/seat and penalties -> submit only if it clears the gate
+  -> aggregate by role/seat and penalties -> human submits the winner if it clears the gate
 ```
 
 ## Where to make the first changes
@@ -375,11 +386,11 @@ Use these only after you have a specific failure to inspect:
 Onboarding is complete when:
 
 1. a shipped policy is uploaded with a non-null `run` attribute;
-2. the exact uploaded version is submitted to Crewrift Prime for the correct
-   player;
+2. the human has submitted the exact uploaded version to Crewrift Prime for the
+   correct player (submission is the human's call — you prepare and surface it);
 3. the submission/qualification state is confirmed;
 4. the next optimization step is recorded as one falsifiable hypothesis or one
    named eval to run.
 
-Do not spend the first hour re-learning the game engine. Submit the working
-baseline, then optimize from evidence.
+Do not spend the first hour re-learning the game engine. Get the working baseline
+ready to submit and surface it to the human, then optimize from evidence.
