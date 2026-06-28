@@ -58,8 +58,30 @@ Read [`README.md`](./README.md#crewrift-rules) only when changing game strategy.
 
 ## Choose the starting policy
 
-Both shipped policies are viable bases. Pick one deliberately, then submit it
+The three shipped policies are all viable bases. Pick one deliberately, then submit it
 before doing deeper research.
+
+### `crewborg` - shared lineage, human-driven, with an LLM gameplay commander
+
+Use **`players/crewborg/`** for the full crewborg Python cognitive stack (perception → belief →
+suspicion → strategy → modes → action) plus a complete in-folder optimization toolkit. It
+**shares a lineage with `crewborg-aaln`**, so both carry that cognitive stack, an in-meeting
+chat/vote LLM, a fitted suspicion model, an optimizer workspace, and structured tracing. What's
+particular to **this** copy:
+
+- **An LLM gameplay commander** (`crewborg/strategy/commander/`) — a *background-thread* LLM that
+  biases the deterministic modes' priorities from a slower outer loop **without ever stalling
+  per-tick play**; off by default (byte-identical deterministic play until enabled). This Playing-phase
+  steering layer is specific to crewborg (it's alongside the shared in-meeting chat/vote LLM).
+- **A human-in-the-loop optimizer** — an 11-skill toolkit (survey → diagnose → experiment →
+  matched A/B; build/upload/submit; a queryable DuckDB/Parquet **event warehouse**) plus a
+  `suspicion_lab/` refit pipeline, built around a **human driving the ideation, experimentation,
+  and analysis** while the agent builds observability and holds the correctness gate. Start at
+  [`players/crewborg/README.md`](./players/crewborg/README.md) →
+  [`players/crewborg/AGENTS.md`](./players/crewborg/AGENTS.md).
+
+Tradeoff: like `crewborg-aaln`, it's a large Python stack — more surface than `notsus` when you
+want to read every line.
 
 ### `crewborg-aaln` - stronger league baseline, richer optimizer
 
@@ -120,6 +142,25 @@ If the active player is not your human's player, select it:
 ```sh
 coworld player use <player_id>
 ```
+
+### Submit `crewborg`
+
+```sh
+export POLICY=crewborg
+docker build --platform=linux/amd64 \
+  -f players/crewborg/crewborg/coworld/Dockerfile -t "$POLICY:prime" players/crewborg
+coworld upload-policy "$POLICY:prime" --name "$POLICY" \
+  --run python \
+  --run -m \
+  --run crewborg.coworld.policy_player
+coworld submit "$POLICY:vN" --league "$LEAGUE_ID" \
+  --auto-champion always --no-open-browser
+```
+
+Run argv from
+[`players/crewborg/coplayer_manifest.json`](./players/crewborg/coplayer_manifest.json); each
+token gets its own `--run`. Or use crewborg's in-folder **`build-and-upload`** skill (build +
+upload) and **`coworld-policy-lifecycle`** (the gated submit + qualification monitoring).
 
 ### Submit `crewborg-aaln`
 
@@ -228,6 +269,21 @@ read live standings/submissions -> inspect recent evals/replays/artifacts
 ## Where to make the first changes
 
 Map the hypothesis to the smallest surface:
+
+For `crewborg`:
+
+| Goal | Start here |
+|---|---|
+| Orient + run the optimization loop | `players/crewborg/README.md` + `AGENTS.md` (the full skills/tools catalog) |
+| Flip a behavior via env flags | `players/crewborg/crewborg/coworld/Dockerfile` / the README env-var table (`CREWBORG_LLM_MEETINGS`, `CREWBORG_LLM_COMMANDER`, tracing levels) |
+| Improve meeting votes / chat | `players/crewborg/crewborg/strategy/meeting/` |
+| Improve suspicion | `…/strategy/suspicion.py` + `social_evidence.py` (refit via `players/crewborg/suspicion_lab/`) |
+| Change role/phase mode selection | `…/strategy/rule_based.py` |
+| Change a stance directly | `…/modes/` (`hunt.py`, `evade.py`, `report_body.py`, …) |
+| Improve imposter hunting | `…/modes/hunt.py`, `search.py`, `…/strategy/opportunity.py`, `trajectory.py` |
+| Improve pathing / stuck recovery | `…/nav.py`, `action.py` |
+| Steer play with the LLM commander | `…/strategy/commander/` |
+| Find WHERE to improve (evidence-first) | the `crewrift-survey` → `crewrift-diagnose` → `crewrift-experiment` skills under `players/crewborg/skills/` |
 
 For `crewborg-aaln`:
 

@@ -1,7 +1,8 @@
 # crewborg — a Crewrift player and its optimization toolkit
 
-> **Why crewborg?** Of the Crewrift players here, crewborg is the one built to be *optimized*, not
-> just run. It's a **cyborg policy** — a fast, deterministic inner loop (perception → belief →
+> **Why crewborg?** crewborg is built for **human-centered optimization** — a strong Crewrift base
+> designed to be *improved with a human in the loop*, not just deployed. It's a **cyborg policy** — a
+> fast, deterministic inner loop (perception → belief →
 > suspicion → strategy → action, every tick, never blocking) under a slower **strategic outer loop**
 > where **gated LLM layers steer without stalling play**: an LLM that runs **meetings** (chat + votes)
 > and a tunable **LLM commander** that biases the agent's priorities from the outer loop. The policy
