@@ -18,6 +18,7 @@ const
   DefaultBedrockModel = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   DefaultUploadName = "notsus"
   BaselinePolicyLabel = "notsus:v1"
+  FirstImposterSlot = 6
   ScoreEpsilon = 0.005
   VersionChartWidth = 760
   VersionChartHeight = 400
@@ -41,12 +42,15 @@ Usage:
   nim r players/notsus/tools/run.nim -- OPPONENT [options]
   nim r players/notsus/tools/run.nim -- BOT_0 ... BOT_7 [options]
   nim r players/notsus/tools/run.nim -- --request-id xreq_... BOT_0 ... BOT_7
+  nim r players/notsus/tools/run.nim -- [MY_BOT] --vs OPPONENT -n 20
 
 Examples:
   nim r players/notsus/tools/run.nim -- -n:2
   nim r players/notsus/tools/run.nim -- notsus:v1 -n:2
   nim r players/notsus/tools/run.nim -- 'notsus:*' notsus:v1 -n:10
   nim r players/notsus/tools/run.nim -- notsus:v9 notsus:v1 -n 10
+  nim r players/notsus/tools/run.nim -- --vs crewborg:v70 -n 20
+  nim r players/notsus/tools/run.nim -- notsus:v12 --vs crewborg:v70 -n 20
   nim r players/notsus/tools/run.nim -- --request-id xreq_... notsus:v9 notsus:v1
 
 Options:
@@ -55,6 +59,10 @@ Options:
                              No bot means current checkout vs seven notsus:v1
                              players. One bot means current checkout vs seven
                              copies of that opponent.
+      --vs BOT               Direct versus mode. With no MY_BOT, uploads the
+                             current checkout. With MY_BOT, runs that policy.
+                             Half the games put MY_BOT in imposter slots G-H;
+                             half put BOT in imposter slots G-H.
   -n, --games N              Number of hosted eight-player games. Default: 10.
       --name NAME            Human run name.
       --out-dir PATH         Static report root.
@@ -152,6 +160,9 @@ type
     tufteDir: string
     assetPrefix: string
     requestId: string
+    focusIndex: int
+    vsMode: bool
+    vsOpponent: BotRef
     pollMs: int
     waitSeconds: int
     downloadReplays: bool
@@ -202,6 +213,18 @@ type
     opponentAvg: float
     avgMargin: float
 
+  VersusSide = enum
+    CandidateImposters,
+    OpponentImposters
+
+  VersusSegment = object
+    side: VersusSide
+    label: string
+    config: ToolConfig
+    requestPath: string
+    detail: JsonNode
+    gameOffset: int
+
   VersionAverage = object
     version: int
     totalScore: float
@@ -242,6 +265,7 @@ proc defaultConfig(): ToolConfig =
     ),
     uploadCurrentIndex: -1,
     uploadName: DefaultUploadName,
+    focusIndex: -1,
     leagueId: DefaultLeagueId,
     coworldId: DefaultCoworldId,
     coworldDir: workspaceDir() / "metta",
@@ -718,6 +742,11 @@ proc readConfig(): ToolConfig =
         result.bots.add resolveBot(
           optionValue(params, i, name, pair.value)
         )
+      of "vs":
+        result.vsMode = true
+        result.vsOpponent = resolveBot(
+          optionValue(params, i, name, pair.value)
+        )
       of "bota", "bot-a", "botb", "bot-b":
         fail("Use eight-player roster arguments instead of " & name & ".")
       of "games":
@@ -799,6 +828,40 @@ proc readConfig(): ToolConfig =
 
   if result.bots.len == 0 and result.requestId.len > 0:
     fail("--request-id requires eight roster bots for labels.")
+
+  if result.vsMode:
+    if result.requestId.len > 0:
+      fail("--vs cannot be used with --request-id.")
+    if result.vsOpponent.isCurrentBot():
+      fail("--vs opponent cannot be the current checkout.")
+    if result.bots.len == 0:
+      result.bots = @[currentBotRef()]
+    elif result.bots.len > 1:
+      fail("--vs accepts zero or one MY_BOT positional argument.")
+    if result.bots[0].isCurrentBot():
+      result.uploadCurrent = true
+      result.uploadCurrentIndex = 0
+    else:
+      result.uploadCurrent = false
+      result.uploadCurrentIndex = -1
+    result.bots.add result.vsOpponent
+    result.focusIndex = 0
+    if result.games mod 2 != 0:
+      fail("--vs requires an even --games value.")
+    if result.games <= 0:
+      fail("--games must be positive.")
+    if result.pollMs <= 0:
+      fail("--poll-ms must be positive.")
+    if result.waitSeconds <= 0:
+      fail("--wait-timeout must be positive.")
+    if not dirExists(result.coworldDir):
+      fail("--coworld-dir does not exist: " & result.coworldDir)
+    if not fileExists(result.tufteDir / "tufte.css"):
+      fail("--tufte-dir is missing tufte.css: " & result.tufteDir)
+    if result.name.len == 0:
+      result.name = botTitle(result.bots[0]) & " vs " &
+        botTitle(result.vsOpponent)
+    return
 
   if result.bots.len == 0:
     result.uploadCurrent = true
@@ -2087,6 +2150,8 @@ proc runMetaJson(
     result["duration"] = %durationText(durationSeconds)
   result["request_id"] = %detail.strField("id")
   result["status"] = %detail.strField("status")
+  if config.focusIndex >= 0:
+    result["focus_index"] = %config.focusIndex
   result["games"] = %gameCount
   result["completed"] = %summary.completed
   result["failed"] = %summary.failed
@@ -2250,6 +2315,22 @@ proc focusGroupIndex(groups: openArray[BotGroup]): int =
   if result < 0 and groups.len > 0:
     result = 0
 
+proc configuredFocusIndex(
+  config: ToolConfig,
+  groups: openArray[BotGroup]
+): int =
+  ## Returns the configured focus group or the optimized bot group.
+  if config.focusIndex >= 0 and config.focusIndex < groups.len:
+    return config.focusIndex
+  groups.focusGroupIndex()
+
+proc metaFocusIndex(meta: JsonNode, groups: openArray[BotGroup]): int =
+  ## Returns the stored focus group or the optimized bot group.
+  let focusIndex = meta.intField("focus_index", -1)
+  if focusIndex >= 0 and focusIndex < groups.len:
+    return focusIndex
+  groups.focusGroupIndex()
+
 proc focusDisplayLabel(group: BotGroup): string =
   ## Returns the raw focused-bot label used on top-level reports.
   if group.title.len > 0:
@@ -2298,10 +2379,10 @@ proc finishRunFocus(
 
 proc focusSummaryFor(
   episodes: openArray[Episode],
-  groups: openArray[BotGroup]
+  groups: openArray[BotGroup],
+  focusIndex: int
 ): RunFocus =
-  ## Summarizes the optimized bot group from loaded episodes.
-  let focusIndex = groups.focusGroupIndex()
+  ## Summarizes one focused bot group from loaded episodes.
   result = groups.initRunFocus(focusIndex)
   if focusIndex < 0 or focusIndex >= groups.len:
     return
@@ -2335,6 +2416,13 @@ proc focusSummaryFor(
       inc result.ties
   result.finishRunFocus(total, opponentTotal)
 
+proc focusSummaryFor(
+  episodes: openArray[Episode],
+  groups: openArray[BotGroup]
+): RunFocus =
+  ## Summarizes the optimized bot group from loaded episodes.
+  episodes.focusSummaryFor(groups, groups.focusGroupIndex())
+
 proc hasScoreValue(node: JsonNode): bool =
   ## Returns true when a JSON node can be read as a score.
   case node.kind
@@ -2366,7 +2454,7 @@ proc legacyFocusSummary(meta: JsonNode): RunFocus =
 proc focusSummaryFor(meta: JsonNode): RunFocus =
   ## Summarizes the optimized bot group from stored run metadata.
   let groups = groupedBots(meta.metaBotRefs())
-  let focusIndex = groups.focusGroupIndex()
+  let focusIndex = meta.metaFocusIndex(groups)
   result = groups.initRunFocus(focusIndex)
   if focusIndex < 0 or focusIndex >= groups.len:
     return meta.legacyFocusSummary()
@@ -2593,7 +2681,7 @@ proc addEpisodeScorePoints(
   ## Adds per-game score points from run metadata when available.
   let
     botGroups = groupedBots(meta.metaBotRefs())
-    focusIndex = botGroups.focusGroupIndex()
+    focusIndex = meta.metaFocusIndex(botGroups)
     runNumber = meta.intField("run_number")
     created = meta.strField("created_at")
   if focusIndex < 0 or focusIndex >= botGroups.len:
@@ -3127,7 +3215,7 @@ proc focusedLogHrefs(
   result = newSeq[string](config.bots.len)
   let
     groups = groupedBots(config.bots)
-    focusIndex = groups.focusGroupIndex()
+    focusIndex = config.configuredFocusIndex(groups)
   if focusIndex < 0 or focusIndex >= groups.len:
     return
   for slot in groups[focusIndex].slots:
@@ -3278,6 +3366,9 @@ proc repairRun(config: ToolConfig, runPath: string) =
         createdText()
     durationSeconds = meta.numberField("duration_seconds", -1.0)
 
+  if meta.strField("mode") == "vs":
+    fail("--repair-run does not support versus runs yet: " & runRoot)
+
   var repairConfig = configForRunMeta(config, runRoot, meta)
 
   echo "Repairing: " & runRoot
@@ -3309,7 +3400,9 @@ proc repairIncompleteRuns(config: ToolConfig) =
     if kind == pcDir and fileExists(path / "run.json"):
       try:
         let meta = parseFile(path / "run.json")
-        if meta.strField("status") != "completed":
+        if meta.strField("mode") == "vs":
+          echo "Skipping versus run repair: " & path
+        elif meta.strField("status") != "completed":
           roots.add path
       except CatchableError as e:
         echo "Skipping unreadable run " & path & ": " &
@@ -3371,6 +3464,511 @@ proc replaceCurrentBots(bots: var seq[BotRef], current: BotRef) =
   for i in 0 ..< bots.len:
     if bots[i].isCurrentBot():
       bots[i] = current
+
+proc versusSideText(side: VersusSide): string =
+  ## Returns a short label for one versus half.
+  case side
+  of CandidateImposters:
+    "candidate imposters"
+  of OpponentImposters:
+    "opponent imposters"
+
+proc versusRequestFileName(side: VersusSide): string =
+  ## Returns the request JSON filename for one versus half.
+  case side
+  of CandidateImposters:
+    "request-candidate-imposters.json"
+  of OpponentImposters:
+    "request-opponent-imposters.json"
+
+proc versusRoster(
+  candidate,
+  opponent: BotRef,
+  side: VersusSide
+): seq[BotRef] =
+  ## Builds the fixed-role roster for one versus half.
+  let
+    imposter =
+      if side == CandidateImposters:
+        candidate
+      else:
+        opponent
+    crew =
+      if side == CandidateImposters:
+        opponent
+      else:
+        candidate
+  for slot in 0 ..< PlayerLetters.len:
+    if slot >= FirstImposterSlot:
+      result.add imposter
+    else:
+      result.add crew
+
+proc versusFocusIndex(side: VersusSide): int =
+  ## Returns the focused candidate group for one versus half roster.
+  case side
+  of CandidateImposters:
+    1
+  of OpponentImposters:
+    0
+
+proc versusSegmentConfig(
+  base: ToolConfig,
+  candidate,
+  opponent: BotRef,
+  side: VersusSide,
+  games: int
+): ToolConfig =
+  ## Builds the hosted-run config for one versus half.
+  result = base
+  result.games = games
+  result.name = base.name & " - " & side.versusSideText()
+  result.nameSet = true
+  result.bots = versusRoster(candidate, opponent, side)
+  result.uploadCurrent = false
+  result.uploadCurrentIndex = -1
+  result.requestId = ""
+  result.focusIndex = side.versusFocusIndex()
+  result.vsMode = false
+
+proc versusSegments(config: ToolConfig, paths: RunPaths): seq[VersusSegment] =
+  ## Builds both versus request segments.
+  let
+    candidate = config.bots[0]
+    opponent = config.bots[1]
+    halfGames = config.games div 2
+  for side in [CandidateImposters, OpponentImposters]:
+    let offset =
+      if side == CandidateImposters:
+        0
+      else:
+        halfGames
+    result.add VersusSegment(
+      side: side,
+      label: side.versusSideText(),
+      config: versusSegmentConfig(
+        config,
+        candidate,
+        opponent,
+        side,
+        halfGames
+      ),
+      requestPath: paths.root / side.versusRequestFileName(),
+      gameOffset: offset
+    )
+
+proc offsetEpisodes(
+  episodes: openArray[Episode],
+  offset: int
+): seq[Episode] =
+  ## Returns episode rows with global game indexes.
+  for episode in episodes:
+    var item = episode
+    item.index = episode.index + offset
+    result.add item
+
+proc requestsTerminal(segments: openArray[VersusSegment]): bool =
+  ## Returns true when every versus request has reached a terminal state.
+  for segment in segments:
+    if not segment.detail.strField("status").isTerminalStatus():
+      return false
+  true
+
+proc combinedStatus(segments: openArray[VersusSegment]): string =
+  ## Returns one aggregate status for both versus requests.
+  var
+    allCompleted = segments.len > 0
+    anyActive = false
+    anyFailed = false
+  for segment in segments:
+    let status = segment.detail.strField("status")
+    if status != "completed":
+      allCompleted = false
+    if not status.isTerminalStatus():
+      anyActive = true
+    elif status == "failed":
+      anyFailed = true
+  if allCompleted:
+    return "completed"
+  if anyActive:
+    return "running"
+  if anyFailed:
+    return "failed"
+  "finished"
+
+proc combinedVersusDetail(
+  segments: openArray[VersusSegment],
+  episodes: openArray[Episode]
+): JsonNode =
+  ## Builds a synthetic XP detail for aggregate metadata.
+  var ids: seq[string]
+  for segment in segments:
+    let id = segment.detail.strField("id")
+    if id.len > 0:
+      ids.add id
+  result = newJObject()
+  result["id"] = %ids.join(",")
+  result["status"] = %segments.combinedStatus()
+  result["episode_count"] = %episodes.len
+  var
+    completed = 0
+    failed = 0
+    running = 0
+    pending = 0
+  for episode in episodes:
+    case episode.status
+    of "completed":
+      inc completed
+    of "failed":
+      inc failed
+    of "running":
+      inc running
+    else:
+      inc pending
+  result["completed_count"] = %completed
+  result["failed_count"] = %failed
+  result["running_count"] = %running
+  result["pending_count"] = %pending
+
+proc writeVersusMeta(
+  config: ToolConfig,
+  paths: RunPaths,
+  segments: openArray[VersusSegment],
+  episodes: openArray[Episode],
+  runNo: int,
+  created: string,
+  durationSeconds = -1.0
+) =
+  ## Writes aggregate versus metadata for the run index.
+  let detail = combinedVersusDetail(segments, episodes)
+  var meta = runMetaJson(
+    config,
+    paths,
+    detail,
+    episodes,
+    runNo,
+    created,
+    durationSeconds
+  )
+  meta["mode"] = %"vs"
+  meta["request_ids"] = newJArray()
+  meta["requests"] = newJArray()
+  for segment in segments:
+    let id = segment.detail.strField("id")
+    meta["request_ids"].add %id
+    meta["requests"].add %*{
+      "id": id,
+      "label": segment.label,
+      "status": segment.detail.strField("status"),
+      "games": segment.config.games,
+      "game_offset": segment.gameOffset
+    }
+  writeFile(paths.meta, meta.pretty() & "\n")
+
+proc versusWinnerText(
+  candidate,
+  opponent: tuple[found: bool, score: float],
+  candidateLabel,
+  opponentLabel: string
+): string =
+  ## Returns the winner label for one direct versus score row.
+  if not candidate.found or not opponent.found:
+    return "-"
+  if candidate.score > opponent.score + ScoreEpsilon:
+    return candidateLabel
+  if opponent.score > candidate.score + ScoreEpsilon:
+    return opponentLabel
+  "tie"
+
+proc versusScoreCell(
+  score: tuple[found: bool, score: float],
+  won: bool
+): string =
+  ## Renders one versus score cell.
+  var text = score.scoreText().htmlEscape()
+  if won:
+    text = "<mark>" & text & "</mark>"
+  text.tableHtmlClass("score-cell")
+
+proc renderVersusIndex(
+  config: ToolConfig,
+  paths: RunPaths,
+  segments: openArray[VersusSegment],
+  episodes: openArray[Episode],
+  runNo: int,
+  durationSeconds = -1.0
+) =
+  ## Writes the aggregate versus report page.
+  let
+    groups = groupedBots(config.bots)
+    focusIndex = config.configuredFocusIndex(groups)
+    focus = episodes.focusSummaryFor(groups, focusIndex)
+    candidateLabel = botTitle(config.bots[0])
+    opponentLabel = botTitle(config.bots[1])
+    status = combinedStatus(segments)
+  var html = pageStart(config.name, config.assetHref(1))
+  html.add "<section>\n"
+  html.add "<p><a href=\"../index.html\">all runs</a></p>\n"
+  html.add "<h1>" & config.name.htmlEscape() & "</h1>\n"
+  html.add "<p>Versus run <b>" & $runNo & "</b>.</p>\n"
+  html.add "<ul>\n"
+  html.add "<li>Status: " & status.htmlEscape() & "</li>\n"
+  html.add "<li>Games: " & $episodes.len & "</li>\n"
+  html.add "<li>" & candidateLabel.htmlEscape() & " record: "
+  html.add $focus.wins & "-" & $focus.losses & "-" & $focus.ties
+  html.add "</li>\n"
+  html.add "<li>" & candidateLabel.htmlEscape() & " average score: "
+  html.add numberText(focus.avg, 2) & "</li>\n"
+  html.add "<li>" & opponentLabel.htmlEscape() & " average score: "
+  html.add numberText(focus.opponentAvg, 2) & "</li>\n"
+  html.add "<li>Average margin: "
+  html.add numberText(focus.avgMargin, 2) & "</li>\n"
+  if durationSeconds >= 0.0:
+    html.add "<li>Run time: " & durationText(durationSeconds) & "</li>\n"
+  html.add "</ul>\n"
+  html.add "<table class=\"wide no-sort name-key\">\n"
+  html.add "<thead><tr><th>Request</th><th>Games</th>"
+  html.add "<th>Status</th><th>Roster</th></tr></thead>\n"
+  html.add "<tbody>\n"
+  for segment in segments:
+    let
+      id = segment.detail.strField("id")
+      roster =
+        if segment.side == CandidateImposters:
+          opponentLabel & " A-F, " & candidateLabel & " G-H"
+        else:
+          candidateLabel & " A-F, " & opponentLabel & " G-H"
+    html.add "<tr>"
+    html.add linkHtml(
+      softmaxDetailUrl("experience-request", id),
+      segment.label
+    ).tableHtmlClass("name-cell")
+    html.add ($segment.config.games).tableCell(numeric = true)
+    html.add segment.detail.strField("status").tableCell()
+    html.add roster.tableCell()
+    html.add "</tr>\n"
+  html.add "</tbody></table>\n"
+  html.add "<table class=\"wide no-sort name-key\">\n"
+  html.add "<thead><tr><th>Side</th><th>Games</th>"
+  html.add "<th>" & candidateLabel.htmlEscape() & "</th>"
+  html.add "<th>" & opponentLabel.htmlEscape() & "</th>"
+  html.add "<th>Margin</th></tr></thead>\n"
+  html.add "<tbody>\n"
+  for segment in segments:
+    let
+      segmentEpisodes = parseEpisodes(segment.detail)
+      segmentFocus = segmentEpisodes.focusSummaryFor(groups, focusIndex)
+    html.add "<tr>"
+    html.add segment.label.tableCell()
+    html.add ($segmentEpisodes.len).tableCell(numeric = true)
+    html.add numberText(segmentFocus.avg, 2).tableCell(numeric = true)
+    html.add numberText(segmentFocus.opponentAvg, 2).tableCell(numeric = true)
+    html.add numberText(segmentFocus.avgMargin, 2).tableCell(numeric = true)
+    html.add "</tr>\n"
+  html.add "</tbody></table>\n"
+  html.add "<table class=\"wide games-table\">\n"
+  html.add "<colgroup><col class=\"game-col\"><col class=\"name-col\">"
+  html.add "<col class=\"game-col\"><col class=\"score-col\">"
+  html.add "<col class=\"score-col\"><col class=\"name-col\"></colgroup>\n"
+  html.add "<thead><tr><th>Game</th><th>Side</th><th>Episode</th>"
+  html.add "<th>" & candidateLabel.htmlEscape() & "</th>"
+  html.add "<th>" & opponentLabel.htmlEscape() & "</th>"
+  html.add "<th>Winner</th></tr></thead>\n<tbody>\n"
+  for segment in segments:
+    let segmentEpisodes = parseEpisodes(segment.detail)
+    for episode in segmentEpisodes:
+      let
+        gameIndex = segment.gameOffset + episode.index
+        candidateScore = episode.scoreForGroup(groups, 0)
+        opponentScore = episode.scoreForGroup(groups, 1)
+        candidateWon = candidateScore.found and opponentScore.found and
+          candidateScore.score > opponentScore.score + ScoreEpsilon
+        opponentWon = candidateScore.found and opponentScore.found and
+          opponentScore.score > candidateScore.score + ScoreEpsilon
+        gameLabel =
+          if episode.id.len > 0:
+            episode.id.shortId()
+          else:
+            $gameIndex
+        winner = versusWinnerText(
+          candidateScore,
+          opponentScore,
+          candidateLabel,
+          opponentLabel
+        )
+      html.add "<tr>"
+      html.add linkHtml(
+        gameFileName(gameIndex),
+        $gameIndex
+      ).tableHtmlClass("game-cell")
+      html.add segment.label.tableCell()
+      html.add gameLabel.tableCell()
+      html.add candidateScore.versusScoreCell(candidateWon)
+      html.add opponentScore.versusScoreCell(opponentWon)
+      html.add winner.tableCell()
+      html.add "</tr>\n"
+  html.add "</tbody></table>\n"
+  html.add "</section>\n"
+  html.add pageEnd()
+  writeFile(paths.root / "index.html", html)
+
+proc renderVersusAll(
+  config: ToolConfig,
+  paths: RunPaths,
+  segments: var seq[VersusSegment],
+  runNo: int,
+  created: string,
+  durationSeconds = -1.0
+): seq[Episode] =
+  ## Writes all versus pages and aggregate metadata.
+  for segment in segments.mitems:
+    segment.config.syncBotsFromDetail(segment.detail)
+    var segmentEpisodes = parseEpisodes(segment.detail)
+    renderGamePages(
+      segment.config,
+      paths,
+      segmentEpisodes,
+      segment.gameOffset
+    )
+    result.add segmentEpisodes.offsetEpisodes(segment.gameOffset)
+  writeVersusMeta(
+    config,
+    paths,
+    segments,
+    result,
+    runNo,
+    created,
+    durationSeconds
+  )
+  writeMainIndex(config)
+  renderVersusIndex(
+    config,
+    paths,
+    segments,
+    result,
+    runNo,
+    durationSeconds
+  )
+
+proc printVersusStatus(segments: openArray[VersusSegment]) =
+  ## Prints compact status lines for both versus requests.
+  for segment in segments:
+    echo segment.label & " " & segment.detail.statusText()
+
+proc pollVersusRequests(
+  config: ToolConfig,
+  paths: RunPaths,
+  segments: var seq[VersusSegment],
+  runNo: int,
+  created: string,
+  runStarted: MonoTime
+): seq[Episode] =
+  ## Polls both versus XP requests until completion or timeout.
+  var failures = 0
+  let deadline = getMonoTime() + initDuration(
+    seconds = config.waitSeconds
+  )
+  while true:
+    result = renderVersusAll(
+      config,
+      paths,
+      segments,
+      runNo,
+      created,
+      elapsedSeconds(runStarted)
+    )
+    printVersusStatus(segments)
+    if segments.requestsTerminal():
+      return
+    if getMonoTime() >= deadline:
+      echo "wait timeout reached; wrote latest versus report"
+      return
+    sleep(config.pollMs)
+    for segment in segments.mitems:
+      if segment.detail.strField("status").isTerminalStatus():
+        continue
+      let requestId = segment.detail.strField("id")
+      try:
+        segment.detail = getRequest(config, requestId)
+        failures = 0
+      except CatchableError as e:
+        inc failures
+        if not e.msg.isTransientPollError():
+          fail("Poll failed: " & e.msg.shortCommandError())
+        if failures.shouldPrintPollFailure():
+          echo "poll transient failure " & $failures &
+            ", keeping last status: " & e.msg.shortCommandError()
+        sleep(config.pollBackoffMs(failures))
+
+proc printVersusTable(
+  episodes: openArray[Episode],
+  bots: openArray[BotRef]
+) =
+  ## Prints the final command-line versus summary.
+  let groups = groupedBots(bots)
+  if groups.len < 2:
+    return
+  let focus = episodes.focusSummaryFor(groups, 0)
+  echo "versus " & botTitle(bots[0]) &
+    " wins=" & $focus.wins &
+    " losses=" & $focus.losses &
+    " ties=" & $focus.ties &
+    " avg=" & numberText(focus.avg, 2) &
+    " vs " & botTitle(bots[1]) & "=" &
+    numberText(focus.opponentAvg, 2) &
+    " avg_margin=" & numberText(focus.avgMargin, 2)
+
+proc runVersus(initialConfig: ToolConfig) =
+  ## Runs direct two-policy versus mode.
+  var config = initialConfig
+  let
+    runStarted = getMonoTime()
+    created = createdText()
+  if config.uploadCurrent:
+    let current = uploadCurrentPolicy(config)
+    config.bots.replaceCurrentBots(current)
+    if not config.nameSet:
+      config.name = botTitle(config.bots[0]) & " vs " &
+        botTitle(config.bots[1])
+  ensureUserToken(config)
+  if not config.nameSet:
+    config.name = botTitle(config.bots[0]) & " vs " &
+      botTitle(config.bots[1])
+
+  let
+    paths = pathsFor(config)
+    runNo = runNumber(config.outDir)
+  var segments = config.versusSegments(paths)
+  for segment in segments.mitems:
+    segment.detail = createRequest(segment.config, segment.requestPath)
+    segment.config.syncBotsFromDetail(segment.detail)
+    config.syncBotsFromDetail(segment.detail)
+    let requestId = segment.detail.strField("id")
+    if requestId.len > 0:
+      echo segment.label & " request: " & requestId
+
+  let episodes = pollVersusRequests(
+    config,
+    paths,
+    segments,
+    runNo,
+    created,
+    runStarted
+  )
+  let durationSeconds = elapsedSeconds(runStarted)
+  discard renderVersusAll(
+    config,
+    paths,
+    segments,
+    runNo,
+    created,
+    durationSeconds
+  )
+  printVersusTable(episodes, config.bots)
+  echo "duration=" & durationText(durationSeconds)
+  echo ""
+  echo "Report: " & paths.root / "index.html"
+  echo "All runs: " & config.outDir / "index.html"
 
 proc runFourPlayer(initialConfig: ToolConfig) =
   ## Runs one eight-player hosted report.
@@ -3435,6 +4033,10 @@ proc runTool(initialConfig: ToolConfig) =
       repairRun(config, runPath)
     writeMainIndex(config)
     echo "All runs: " & config.outDir / "index.html"
+    return
+
+  if config.vsMode:
+    runVersus(config)
     return
 
   runFourPlayer(config)
