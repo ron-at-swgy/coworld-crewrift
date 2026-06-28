@@ -30,6 +30,10 @@ type
     role: string
     won: bool
     hasResult: bool
+    dead: bool
+    tasks: int
+    kills: int
+    chats: int
 
 const
   Usage = """
@@ -226,7 +230,7 @@ proc colorHex(colorName: string): string =
   else:
     "#ffffff"
 
-proc playerChipHtml(label: string): string =
+proc playerChipHtml(label: string, dead = false): string =
   ## Renders one replay player label with its color swatch.
   let clean = label.oneLine()
   if clean.len == 0:
@@ -234,7 +238,12 @@ proc playerChipHtml(label: string): string =
   result.add "<span class=\"crew-chip\">"
   result.add "<span class=\"crew-swatch\" style=\"background: "
   result.add colorHex(clean.colorNameFromLabel()).htmlEscape()
-  result.add "\"></span><span>"
+  result.add "\"></span><span"
+  if dead:
+    result.add " class=\"crew-name player-dead\""
+  else:
+    result.add " class=\"crew-name\""
+  result.add ">"
   result.add clean.htmlEscape()
   result.add "</span></span>"
 
@@ -417,6 +426,38 @@ proc setPlayerWinner(players: var seq[PlayerInfo], slot: int) =
     players.add PlayerInfo()
   players[slot].won = true
 
+proc setPlayerDead(players: var seq[PlayerInfo], slot: int) =
+  ## Marks one player as dead or voted out.
+  if slot < 0:
+    return
+  while players.len <= slot:
+    players.add PlayerInfo()
+  players[slot].dead = true
+
+proc addPlayerTask(players: var seq[PlayerInfo], slot: int) =
+  ## Counts one completed task for a player.
+  if slot < 0:
+    return
+  while players.len <= slot:
+    players.add PlayerInfo()
+  inc players[slot].tasks
+
+proc addPlayerKill(players: var seq[PlayerInfo], slot: int) =
+  ## Counts one kill for a player.
+  if slot < 0:
+    return
+  while players.len <= slot:
+    players.add PlayerInfo()
+  inc players[slot].kills
+
+proc addPlayerChat(players: var seq[PlayerInfo], slot: int) =
+  ## Counts one chat message for a player.
+  if slot < 0:
+    return
+  while players.len <= slot:
+    players.add PlayerInfo()
+  inc players[slot].chats
+
 proc collectPlayers(timeline: ReplayTimeline): seq[PlayerInfo] =
   ## Returns slot-indexed replay players with in-game labels and roles.
   var hasResult = false
@@ -434,6 +475,18 @@ proc collectPlayers(timeline: ReplayTimeline): seq[PlayerInfo] =
     if event.kind == Score and event.scoreReason == "winning":
       result.setPlayerWinner(event.actorSlot)
       hasResult = true
+    case event.kind
+    of Kill:
+      result.addPlayerKill(event.actorSlot)
+      result.setPlayerDead(event.secondarySlot)
+    of Died:
+      result.setPlayerDead(event.actorSlot)
+    of CompletedTask:
+      result.addPlayerTask(event.actorSlot)
+    of Chat:
+      result.addPlayerChat(event.actorSlot)
+    else:
+      discard
   if hasResult:
     for player in result.mitems:
       if player.label.len > 0:
@@ -575,17 +628,6 @@ proc replayLogTextForPath*(
   let timeline = expandReplayTimeline(loadReplay(path))
   replayLogTextForTimeline(timeline, path, labels)
 
-proc renderSummaryHtml(summary: ReplaySummary): string =
-  ## Renders compact summary counts as HTML.
-  result.add "<ul>\n"
-  result.add "<li>Kills: " & $summary.kills & "</li>\n"
-  result.add "<li>Completed tasks: " & $summary.tasks & "</li>\n"
-  result.add "<li>Meetings called: " & $summary.meetings & "</li>\n"
-  result.add "<li>Chat messages: " & $summary.chats & "</li>\n"
-  result.add "<li>Votes cast: " & $summary.votes & "</li>\n"
-  result.add "<li>Deaths or vote-outs: " & $summary.deaths & "</li>\n"
-  result.add "</ul>\n"
-
 proc renderPlayersHtml(
   players: openArray[PlayerInfo],
   logHrefs: openArray[string]
@@ -598,7 +640,7 @@ proc renderPlayersHtml(
   result.add "<h2>Players</h2>\n"
   result.add "<table class=\"report-table no-sort replay-players\">\n"
   result.add "<thead><tr><th>Seat</th><th>Player</th><th>Role</th>"
-  result.add "<th>Win/Loss</th>"
+  result.add "<th>Win/Loss</th><th>Tasks</th><th>Kills</th><th>Chat</th>"
   if showLogs:
     result.add "<th>Log</th>"
   result.add "</tr>"
@@ -607,13 +649,16 @@ proc renderPlayersHtml(
   for slot, player in players:
     if player.label.len == 0:
       continue
-    result.add "<tr><td>" & slot.seatPrefix().htmlEscape() & "</td><td>"
-    result.add player.label.playerChipHtml()
+    result.add "<tr><td>" & slot.seatPrefix().htmlEscape()
+    result.add "</td><td class=\"player-col\">"
+    result.add player.label.playerChipHtml(player.dead)
     result.add "</td><td class=\"role-col\">"
     result.add player.role.roleDisplay().htmlEscape()
     result.add "</td><td class=\"" & player.resultClass().htmlEscape() & "\">"
     result.add player.resultDisplay().htmlEscape()
-    result.add "</td>"
+    result.add "</td><td class=\"count-col\">" & $player.tasks
+    result.add "</td><td class=\"count-col\">" & $player.kills
+    result.add "</td><td class=\"count-col\">" & $player.chats & "</td>"
     if showLogs:
       result.add "<td class=\"log-col\">"
       if slot >= 0 and slot < logHrefs.len and logHrefs[slot].len > 0:
@@ -623,6 +668,39 @@ proc renderPlayersHtml(
       result.add "</td>"
     result.add "</tr>\n"
   result.add "</tbody></table>\n"
+  result.add "</section>\n"
+
+proc renderReplayStatsHtml(
+  timeline: ReplayTimeline,
+  source,
+  replayHref: string,
+  summary: ReplaySummary
+): string =
+  ## Renders replay metadata and counts in a footer section.
+  result.add "<section class=\"replay-stats\">\n"
+  result.add "<h2>Replay Log Stats</h2>\n"
+  result.add "<ul>\n"
+  if replayHref.len > 0:
+    result.add "<li>Source: <code>" & replayHref.htmlEscape()
+    result.add "</code></li>\n"
+  elif source.len > 0:
+    result.add "<li>Source: <code>" & source.htmlEscape()
+    result.add "</code></li>\n"
+  if source.len > 0 and source != replayHref:
+    result.add "<li>Local path: <code>" & source.htmlEscape()
+    result.add "</code></li>\n"
+  result.add "<li>Ticks parsed: " & $timeline.tickCount & "</li>\n"
+  if timeline.hashFailed:
+    result.add "<li>Warning: replay hash failed at tick "
+    result.add $timeline.failTick
+    result.add "; log may be partial.</li>\n"
+  result.add "<li>Tasks: " & $summary.tasks & "</li>\n"
+  result.add "<li>Kills: " & $summary.kills & "</li>\n"
+  result.add "<li>Meetings called: " & $summary.meetings & "</li>\n"
+  result.add "<li>Chat messages: " & $summary.chats & "</li>\n"
+  result.add "<li>Votes cast: " & $summary.votes & "</li>\n"
+  result.add "<li>Deaths or vote-outs: " & $summary.deaths & "</li>\n"
+  result.add "</ul>\n"
   result.add "</section>\n"
 
 proc renderEventsHtml(timeline: ReplayTimeline): string =
@@ -664,25 +742,9 @@ proc renderReplayHtmlForTimeline*(
   ## Renders a replay timeline as Tufte-style HTML body sections.
   discard labels
   let summary = timeline.replaySummary()
-  result.add "<section>\n"
-  result.add "<h2>Replay Log</h2>\n"
-  result.add "<ul>\n"
-  if replayHref.len > 0:
-    result.add "<li>Source: <code>" & replayHref.htmlEscape()
-    result.add "</code></li>\n"
-  elif source.len > 0:
-    result.add "<li>Source: <code>" & source.htmlEscape()
-    result.add "</code></li>\n"
-  result.add "<li>Ticks parsed: " & $timeline.tickCount & "</li>\n"
-  if timeline.hashFailed:
-    result.add "<li>Warning: replay hash failed at tick "
-    result.add $timeline.failTick
-    result.add "; log may be partial.</li>\n"
-  result.add "</ul>\n"
-  result.add summary.renderSummaryHtml()
-  result.add "</section>\n"
   result.add renderPlayersHtml(timeline.collectPlayers(), logHrefs)
   result.add renderEventsHtml(timeline)
+  result.add renderReplayStatsHtml(timeline, source, replayHref, summary)
 
 proc renderReplayHtmlForTimeline*(
   timeline: ReplayTimeline,
@@ -721,12 +783,18 @@ proc replayExtractorCss*(): string =
   result.add "    .replay-log .what-col { white-space: normal; }\n"
   result.add "    .replay-log .mark-row td { color: "
   result.add "var(--failure-color, #f03b20); font-weight: 600; }\n"
-  result.add "    .replay-players { max-width: 48rem; }\n"
+  result.add "    .replay-players { max-width: 56rem; }\n"
+  result.add "    .replay-players .player-col { text-align: left; }\n"
   result.add "    .replay-players .role-col { width: 7rem; }\n"
   result.add "    .replay-players .result-col { width: 5rem; }\n"
+  result.add "    .replay-players .count-col { width: 4rem; "
+  result.add "text-align: right; font-variant-numeric: tabular-nums; }\n"
   result.add "    .replay-players .result-win { color: "
   result.add "var(--failure-color, #f03b20); font-weight: 600; }\n"
   result.add "    .replay-players .log-col { width: 4rem; }\n"
+  result.add "    .replay-players .player-dead { color: "
+  result.add "var(--failure-color, #f03b20); text-decoration: "
+  result.add "line-through; text-decoration-thickness: 2px; }\n"
   result.add "    .crew-chip { display: inline-flex; align-items: center; "
   result.add "gap: 0.35rem; white-space: nowrap; }\n"
   result.add "    .crew-swatch { box-sizing: border-box; display: inline-block; "

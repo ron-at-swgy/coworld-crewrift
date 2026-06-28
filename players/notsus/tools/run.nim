@@ -61,8 +61,8 @@ Options:
                              copies of that opponent.
       --vs BOT               Direct versus mode. With no MY_BOT, uploads the
                              current checkout. With MY_BOT, runs that policy.
-                             Half the games put MY_BOT in imposter slots G-H;
-                             half put BOT in imposter slots G-H.
+                             Half the games give MY_BOT fixed imposter roles
+                             in slots G-H; half give BOT fixed imposter roles.
   -n, --games N              Number of hosted eight-player games. Default: 10.
       --name NAME            Human run name.
       --out-dir PATH         Static report root.
@@ -161,6 +161,7 @@ type
     assetPrefix: string
     requestId: string
     focusIndex: int
+    slotRoles: seq[string]
     vsMode: bool
     vsOpponent: BotRef
     pollMs: int
@@ -1380,13 +1381,28 @@ proc uploadCurrentPolicy(config: ToolConfig): BotRef =
     sleep(UploadRetryMs)
   fail("Upload failed without returning a policy label.")
 
+proc slotRolesJson(roles: openArray[string]): JsonNode =
+  ## Builds full Crewrift slot overrides with fixed roles.
+  result = newJArray()
+  for role in roles:
+    var slot = newJObject()
+    if role.len > 0:
+      slot["role"] = %role
+    result.add slot
+
 proc requestBody(config: ToolConfig): JsonNode =
   ## Builds the hosted XP request body.
+  if config.slotRoles.len > 0 and config.slotRoles.len != config.bots.len:
+    fail("Fixed slot roles must match the roster length.")
   result = newJObject()
   if config.coworldId.len > 0:
     result["target"] = %*{"coworld_id": config.coworldId}
   else:
     result["target"] = %*{"league_id": config.leagueId}
+  if config.slotRoles.len > 0:
+    result["game_config_overrides"] = newJObject()
+    result["game_config_overrides"]["slots"] =
+      slotRolesJson(config.slotRoles)
   result["roster"] = newJArray()
   for i, bot in config.bots:
     result["roster"].add %*{
@@ -2005,9 +2021,12 @@ proc softmaxDetailUrl(kind, id: string): string =
       "overview"
   SoftmaxObservatoryUrl & "#tab=" & tab & "&detail=" & kind & ":" & id
 
-proc linkHtml(href, text: string): string =
+proc linkHtml(href, text: string, newTab = false): string =
   ## Renders one HTML link.
-  "<a href=\"" & href.htmlEscape() & "\">" & text.htmlEscape() & "</a>"
+  result.add "<a href=\"" & href.htmlEscape() & "\""
+  if newTab:
+    result.add " target=\"_blank\" rel=\"noopener noreferrer\""
+  result.add ">" & text.htmlEscape() & "</a>"
 
 proc markHtml(text: string): string =
   ## Renders highlighted HTML using the Tufte mark color.
@@ -3096,24 +3115,19 @@ proc renderReplayHtml(
   result.add "<li>Episode request: "
   result.add linkHtml(
     softmaxDetailUrl("episode-request", episode.id),
-    "Softmax episode"
+    "Softmax episode",
+    newTab = true
   )
   result.add "</li>\n"
+  result.add "<li>Replay artifact: <a href=\""
+  result.add replayHref.htmlEscape()
+  result.add "\">download</a></li>\n"
   result.add "<li>Status: " & episode.status.htmlEscape() & "</li>\n"
   if episode.liveUrl.len > 0:
     result.add "<li><a href=\"" & episode.liveUrl.htmlEscape()
     result.add "\">Live view</a></li>\n"
   if episode.error.len > 0:
     result.add "<li>Error: " & episode.error.htmlEscape() & "</li>\n"
-  result.add "</ul>\n"
-  result.add "</section>\n"
-  result.add "<section>\n"
-  result.add "<h2>Replay artifact</h2>\n"
-  result.add "<ul>\n"
-  result.add "<li><a href=\"" & replayHref.htmlEscape()
-  result.add "\">Downloaded replay</a></li>\n"
-  result.add "<li>Local path: <code>" & replayPath.htmlEscape()
-  result.add "</code></li>\n"
   result.add "</ul>\n"
   result.add "</section>\n"
   result.add renderReplayHtmlForPath(replayPath, replayHref, labels, logHrefs)
@@ -3131,16 +3145,18 @@ proc renderPendingHtml(episode: Episode, gameIndex = -1): string =
   result.add "<li>Episode request: "
   result.add linkHtml(
     softmaxDetailUrl("episode-request", episode.id),
-    "Softmax episode"
+    "Softmax episode",
+    newTab = true
   )
   result.add "</li>\n"
+  if episode.replayUrl.len > 0:
+    result.add "<li>Replay artifact: <a href=\""
+    result.add episode.replayUrl.htmlEscape()
+    result.add "\">download</a></li>\n"
   result.add "<li>Status: " & episode.status.htmlEscape() & "</li>\n"
   if episode.liveUrl.len > 0:
     result.add "<li><a href=\"" & episode.liveUrl.htmlEscape()
     result.add "\">Live view</a></li>\n"
-  if episode.replayUrl.len > 0:
-    result.add "<li><a href=\"" & episode.replayUrl.htmlEscape()
-    result.add "\">Replay artifact</a></li>\n"
   if episode.error.len > 0:
     result.add "<li>Error: " & episode.error.htmlEscape() & "</li>\n"
   result.add "</ul>\n"
@@ -3323,11 +3339,17 @@ proc botFromMeta(node: JsonNode, index: int): BotRef =
   if result.policyId.len == 0:
     fail("Stored bot " & $(index + 1) & " is missing policy_id.")
 
-proc botsFromMeta(meta: JsonNode): seq[BotRef] =
+proc botsFromMeta(
+  meta: JsonNode,
+  expectedCount = PlayerLetters.len
+): seq[BotRef] =
   ## Reads bot references from stored run metadata.
   let bots = meta.arrayField("bots")
-  if bots.len != PlayerLetters.len:
-    fail("Stored run metadata must contain exactly eight bots.")
+  if bots.len != expectedCount:
+    fail(
+      "Stored run metadata must contain exactly " &
+        $expectedCount & " bots."
+    )
   for i in 0 ..< bots.len:
     result.add botFromMeta(bots[i], i)
 
@@ -3348,6 +3370,92 @@ proc configForRunMeta(
   if result.requestId.len == 0:
     fail("Stored run metadata is missing request_id.")
 
+proc configForVersusRunMeta(
+  base: ToolConfig,
+  runRoot: string,
+  meta: JsonNode
+): ToolConfig =
+  ## Builds a versus repair config from stored run metadata.
+  result = base
+  result.outDir = runRoot.parentDir()
+  result.name = meta.strField("name")
+  result.bots = botsFromMeta(meta, 2)
+  result.uploadCurrent = false
+  result.games = meta.intField("games")
+  result.focusIndex = meta.intField("focus_index", 0)
+  if result.name.len == 0:
+    result.name = botTitle(result.bots[0]) & " vs " &
+      botTitle(result.bots[1])
+  if result.games <= 0:
+    fail("Stored versus run metadata is missing games.")
+
+proc requestIdsFromMeta(meta: JsonNode): seq[string] =
+  ## Reads stored hosted request ids from run metadata.
+  for item in meta.arrayField("request_ids"):
+    if item.kind == JString and item.getStr().len > 0:
+      result.add item.getStr()
+  if result.len == 0:
+    for id in meta.strField("request_id").split(","):
+      let clean = id.strip()
+      if clean.len > 0:
+        result.add clean
+  if result.len == 0:
+    fail("Stored run metadata is missing request ids.")
+
+proc versusSegments(
+  config: ToolConfig,
+  paths: RunPaths
+): seq[VersusSegment]
+
+proc renderVersusAll(
+  config: ToolConfig,
+  paths: RunPaths,
+  segments: var seq[VersusSegment],
+  runNo: int,
+  created: string,
+  durationSeconds = -1.0
+): seq[Episode]
+
+proc printVersusStatus(segments: openArray[VersusSegment])
+
+proc printVersusTable(
+  episodes: openArray[Episode],
+  bots: openArray[BotRef]
+)
+
+proc repairVersusRun(
+  config: ToolConfig,
+  runRoot: string,
+  paths: RunPaths,
+  meta: JsonNode,
+  runNo: int,
+  created: string,
+  durationSeconds: float
+) =
+  ## Refreshes one existing direct versus run folder.
+  var repairConfig = configForVersusRunMeta(config, runRoot, meta)
+  let requestIds = meta.requestIdsFromMeta()
+  var segments = repairConfig.versusSegments(paths)
+  if requestIds.len != segments.len:
+    fail("Stored versus run has unexpected request count.")
+  echo "Repairing versus: " & runRoot
+  for i in 0 ..< segments.len:
+    let requestId = requestIds[i]
+    echo segments[i].label & " request: " & requestId
+    segments[i].detail = getRequestWithRetry(repairConfig, requestId, 6)
+    segments[i].config.syncBotsFromDetail(segments[i].detail)
+  let episodes = renderVersusAll(
+    repairConfig,
+    paths,
+    segments,
+    runNo,
+    created,
+    durationSeconds
+  )
+  printVersusStatus(segments)
+  printVersusTable(episodes, repairConfig.bots)
+  echo "Report: " & paths.root / "index.html"
+
 proc repairRun(config: ToolConfig, runPath: string) =
   ## Refreshes one existing run folder from its hosted XP request.
   let runRoot = runPath.absolutePath()
@@ -3367,7 +3475,16 @@ proc repairRun(config: ToolConfig, runPath: string) =
     durationSeconds = meta.numberField("duration_seconds", -1.0)
 
   if meta.strField("mode") == "vs":
-    fail("--repair-run does not support versus runs yet: " & runRoot)
+    repairVersusRun(
+      config,
+      runRoot,
+      paths,
+      meta,
+      runNo,
+      created,
+      durationSeconds
+    )
+    return
 
   var repairConfig = configForRunMeta(config, runRoot, meta)
 
@@ -3486,7 +3603,7 @@ proc versusRoster(
   opponent: BotRef,
   side: VersusSide
 ): seq[BotRef] =
-  ## Builds the fixed-role roster for one versus half.
+  ## Builds the roster for one fixed-role versus half.
   let
     imposter =
       if side == CandidateImposters:
@@ -3503,6 +3620,14 @@ proc versusRoster(
       result.add imposter
     else:
       result.add crew
+
+proc versusSlotRoles(): seq[string] =
+  ## Returns fixed Crewrift roles for versus slots A-F and G-H.
+  for slot in 0 ..< PlayerLetters.len:
+    if slot >= FirstImposterSlot:
+      result.add "imposter"
+    else:
+      result.add "crew"
 
 proc versusFocusIndex(side: VersusSide): int =
   ## Returns the focused candidate group for one versus half roster.
@@ -3525,6 +3650,7 @@ proc versusSegmentConfig(
   result.name = base.name & " - " & side.versusSideText()
   result.nameSet = true
   result.bots = versusRoster(candidate, opponent, side)
+  result.slotRoles = versusSlotRoles()
   result.uploadCurrent = false
   result.uploadCurrentIndex = -1
   result.requestId = ""
