@@ -1,0 +1,67 @@
+# Deploy the Crewrift Prime commissioner image to the hosted Softmax platform.
+#
+# Required repository secret:
+#   SOFTMAX_API_TOKEN  - a TEAM `usr_` token. Set it in
+#                        Settings -> Secrets and variables -> Actions.
+#                        The `coworld`/`softmax` CLI reads its bearer token from
+#                        ~/.softmax/credentials.yaml, NOT from this env var, so the
+#                        workflow seeds it headlessly via `softmax set-token`.
+#
+# coworld CLI version: 0.1.26 (public PyPI, requires Python 3.11-3.12; we use 3.12).
+name: "Deploy Crewrift Prime Commissioner"
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'crewrift-prime/commissioner/**'
+      - '.github/workflows/deploy-commissioner.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-commissioner
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: SOFTMAX_OBSERVATORY
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install coworld CLI
+        run: uv pip install --system coworld==0.1.26
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build commissioner image
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --load \
+            -t crewrift-prime-commissioner:${{ github.sha }} \
+            crewrift-prime/commissioner
+
+      - name: Seed Softmax credentials
+        env:
+          SOFTMAX_API_TOKEN: ${{ secrets.SOFTMAX_API_TOKEN }}
+        run: |
+          if [ -z "$SOFTMAX_API_TOKEN" ]; then
+            echo "::error::SOFTMAX_API_TOKEN secret is empty. Set a team usr_ token in repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          softmax set-token "$SOFTMAX_API_TOKEN" --server https://softmax.com/api
+          python -c "from softmax.auth import clear_active_player_session; clear_active_player_session(server='https://softmax.com/api')"
+
+      - name: Deploy commissioner
+        run: |
+          coworld patch-commissioner crewrift_prime \
+            crewrift-prime-commissioner:${{ github.sha }} \
+            --runnable-id among-them-commissioner
