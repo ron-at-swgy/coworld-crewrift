@@ -1233,10 +1233,18 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         shown with a 0 win rate (and 0 rounds played) rather than being dropped, so
         the board never hides an active player.
 
-        The displayed ``score`` is the player's all-time WIN RATE — total episodes
-        won divided by total episodes played — always a number in ``[0, 1]``. A
-        player with no played episodes scores 0. ``rounds_played`` is still the
-        number of rounds the player appears in.
+        RANKING is by the player's all-time WIN RATE — total episodes won divided
+        by total episodes played, always in ``[0, 1]`` — descending (highest win
+        rate = rank 1), with a stable player-id tiebreak.
+
+        The displayed ``score`` is DISPLAY-ONLY and is the player's ABSOLUTE
+        CUMULATIVE SUM of per-round scores across ALL completed rounds, FLOORED AT
+        0 (never negative): ``max(0.0, sum of per-round win scores)``. In the
+        Competition path the per-round score is the count of episodes the player
+        won that round, so the cumulative sum is the player's all-time won-episode
+        total. The win RATE is still what orders the board; only the value placed
+        in ``score`` differs from the rate. ``rounds_played`` is the number of
+        rounds the player appears in.
         """
         round_episodes = round_episodes or {}
         wins_total: dict[Any, float] = {}
@@ -1279,6 +1287,12 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         snapshots: list[DivisionLeaderboardSnapshot] = []
         for rank, player_id in enumerate(ordered, start=1):
             win_rate = _win_rate(player_id)
+            # DISPLAY-ONLY score: absolute cumulative sum of the player's per-round
+            # win scores across ALL completed rounds, floored at 0. Ranking above is
+            # still by win RATE; this only changes the number shown in the Score
+            # column (per-round score is the won-episode count, so this is the
+            # player's all-time won-episode total).
+            cumulative_score = max(0.0, wins_total.get(player_id, 0.0))
             _emit_decision_log(
                 {
                     "division": "Competition",
@@ -1286,6 +1300,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                     "player_id": str(player_id) if player_id is not None else None,
                     "rank": rank,
                     "win_rate": win_rate,
+                    "score": cumulative_score,
                     "wins": wins_total.get(player_id, 0.0),
                     "episodes_played": episodes_total.get(player_id, 0),
                     "rounds_played": rounds_played.get(player_id, 0),
@@ -1296,7 +1311,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                     player_id=player_id,
                     player_name=name_by_player.get(player_id),
                     rank=rank,
-                    score=win_rate,
+                    score=cumulative_score,
                     rounds_played=rounds_played.get(player_id, 0),
                     policy_version_ids=set(pvids_by_player.get(player_id, set())),
                     recent_rounds=recent(player_id),
@@ -1331,21 +1346,23 @@ def _win_rate_leaderboard(
     division_id: UUID,
     entries: list[CommissionerDivisionLeaderboardEntry],
 ) -> CommissionerDivisionLeaderboard:
-    """Build the published Competition board with a WIN-RATE-labeled score column.
+    """Build the published Competition board.
 
     Mirrors the vendored ``division_leaderboard_from_entries`` shape (so the
-    platform persists it verbatim instead of re-synthesizing it), but labels the
-    score column/view "Win %" since the Competition ``score`` is a win rate, not a
-    raw point total. The underlying ``score`` value is unchanged (a fraction in
-    ``[0, 1]``); only the displayed header differs.
+    platform persists it verbatim instead of re-synthesizing it). The board is
+    RANKED by all-time win rate (see ``_win_total_board``), but the ``score``
+    column now carries the DISPLAY-ONLY absolute cumulative sum of each player's
+    per-round scores (floored at 0), not the win rate — so the column is labeled
+    "Score" accordingly. The win-rate metric the UI shows is derived separately
+    from each row's recent-round strip.
     """
     view = CommissionerDivisionLeaderboardView(
         key="score",
-        title="Win %",
+        title="Score",
         axis_values={"metric": "score", "timeframe": "legacy"},
         columns=[
             CommissionerDivisionLeaderboardColumn(key="rank", label="Rank", value_type="integer", sort="asc"),
-            CommissionerDivisionLeaderboardColumn(key="score", label="Win %", value_type="number", sort="desc"),
+            CommissionerDivisionLeaderboardColumn(key="score", label="Score", value_type="number", sort="desc"),
             CommissionerDivisionLeaderboardColumn(
                 key="rounds_played", label="Rounds Played", value_type="integer"
             ),

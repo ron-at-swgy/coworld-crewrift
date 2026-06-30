@@ -400,9 +400,17 @@ class _LeaderboardAgg(BaseModel):
     policy_version_ids: set[UUID] = Field(default_factory=set)
     weighted_score_sum: float = 0.0
     weight_sum: float = 0.0
+    # Plain cumulative sum of the player's per-round scores across ALL completed
+    # rounds (no decay/weighting). The displayed leaderboard score is this total
+    # floored at 0 (never negative); see ``score()``.
+    raw_score_sum: float = 0.0
 
     def score(self) -> float:
-        return self.weighted_score_sum / self.weight_sum
+        # Display score = absolute cumulative sum of per-round scores, floored at
+        # 0. (The decayed-mean EWMA — ``weighted_score_sum / weight_sum`` — is no
+        # longer used for the displayed score; the fields are retained for any
+        # callers that still reference the weighted aggregation.)
+        return max(0.0, self.raw_score_sum)
 
 
 class LeaderboardRoundResultSnapshot(RoundResultSnapshot):
