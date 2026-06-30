@@ -163,10 +163,12 @@ class LeaderboardFlipRegressionTest(unittest.TestCase):
         # Both players appear, keyed by player id.
         self.assertEqual({row.subject_id for row in rows}, {"ply_a", "ply_b"})
         by_player = {row.subject_id: row for row in rows}
-        # The consistent winner is rank 1; its score is the all-time WIN RATE (won
-        # all 8 of the 8 episodes it played => 1.0), and the loser scored 0.0.
+        # The consistent winner is rank 1 (ranking is still by WIN RATE: it won all
+        # 8 episodes it played => 1.0 win rate). The displayed SCORE is now the
+        # floored cumulative sum of per-round win scores: ply_a won 1 episode in
+        # each of its 8 rounds => 8.0; ply_b never won => 0.0.
         self.assertEqual(by_player["ply_a"].values["rank"], 1)
-        self.assertEqual(by_player["ply_a"].values["score"], 1.0)
+        self.assertEqual(by_player["ply_a"].values["score"], 8.0)
         self.assertEqual(by_player["ply_b"].values["score"], 0.0)
         # rounds_played is tracked.
         self.assertEqual(by_player["ply_a"].values["rounds_played"], 8)
@@ -456,15 +458,21 @@ class WinRateIsEpisodesWonOverPlayedTest(unittest.TestCase):
         )
         snapshots = commissioner.rank_division(ctx)
         by_player = {str(s.player_id): s for s in snapshots}
-        # Every player's WIN% is exactly wins/played.
+        # The displayed SCORE is now the floored cumulative sum of per-round win
+        # scores. With a single round, that equals this round's win count.
         for pid, (wins, played) in plan.items():
-            self.assertAlmostEqual(by_player[pid].score, wins / played, places=9)
-        # The non-top players are NOT zeroed (the regression symptom).
+            self.assertAlmostEqual(by_player[pid].score, float(wins), places=9)
+        # The non-top players still earned wins, so their score is NOT zeroed.
         self.assertGreater(by_player["ply_b"].score, 0.0)
         self.assertGreater(by_player["ply_d"].score, 0.0)
-        # Ranks follow descending WIN%.
-        scores_in_rank_order = [s.score for s in sorted(snapshots, key=lambda s: s.rank)]
-        self.assertEqual(scores_in_rank_order, sorted(scores_in_rank_order, reverse=True))
+        # RANKING is still by WIN% (wins/played), highest first. Build the rate map
+        # to assert rank order follows descending win rate, not the cumulative
+        # score (here they happen to agree, but the sort key is the rate).
+        win_rate = {pid: wins / played for pid, (wins, played) in plan.items()}
+        rates_in_rank_order = [win_rate[str(s.player_id)] for s in sorted(snapshots, key=lambda s: s.rank)]
+        self.assertEqual(rates_in_rank_order, sorted(rates_in_rank_order, reverse=True))
+        # ply_a (0.8333) ranks above ply_d (0.1667).
+        self.assertLess(by_player["ply_a"].rank, by_player["ply_d"].rank)
 
     def test_team_wins_credit_every_winning_player(self) -> None:
         """A crewrift episode is won by a whole TEAM, so multiple players win it.

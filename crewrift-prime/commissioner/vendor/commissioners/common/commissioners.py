@@ -248,6 +248,10 @@ class BaselineCommissioner(Commissioner):
             aggs[player_round.player_id].policy_version_ids.add(player_round.policy_version_id)
             aggs[player_round.player_id].weighted_score_sum += player_round.score * weight
             aggs[player_round.player_id].weight_sum += weight
+            # Absolute cumulative sum of per-round scores (no decay) — the value
+            # the displayed leaderboard score now uses (floored at 0 in
+            # ``_LeaderboardAgg.score``).
+            aggs[player_round.player_id].raw_score_sum += player_round.score
 
         ranks_by_round_and_player = {
             (player_round.round_id, player_round.player_id): player_round.rank
