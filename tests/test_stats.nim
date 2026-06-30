@@ -181,8 +181,9 @@ suite "stats":
     check sim.timeLimitReached
 
     let results = parseJson(sim.playerResultsJson())
+    # scores is the win-point (1 if won, else 0); a connect-timeout slot never wins.
     check results["scores"][0].getInt() == 0
-    check results["scores"][1].getInt() == ConnectionTimeoutPenalty
+    check results["scores"][1].getInt() == 0
     check results["connect_timeout"][0].getInt() == 0
     check results["connect_timeout"][1].getInt() == 1
     check results["disconnect_timeout"][0].getInt() == 0
@@ -230,9 +231,10 @@ suite "stats":
     check sim.timeLimitReached
 
     let results = parseJson(sim.playerResultsJson())
+    # Draw (time limit): nobody won, so every win-point is 0.
     check results["scores"][impIndex].getInt() == 0
-    check results["scores"][crew1Index].getInt() == ConnectionTimeoutPenalty
-    check results["scores"][crew2Index].getInt() == 4
+    check results["scores"][crew1Index].getInt() == 0
+    check results["scores"][crew2Index].getInt() == 0
     check results["connect_timeout"][crew1Index].getInt() == 0
     check results["disconnect_timeout"][crew1Index].getInt() == 1
     check not results["win"][crew1Index].getBool()
@@ -314,7 +316,7 @@ suite "stats":
 
     let results = parseJson(sim.playerResultsJson())
     check results["win"][1].getBool()
-    check results["scores"][1].getInt() == WinReward
+    check results["scores"][1].getInt() == 1
     check results["win"][2].getBool()
     check results["win"][3].getBool()
 
@@ -586,14 +588,14 @@ suite "stats":
     let results = parseJson(sim.playerResultsJson())
     check results["names"].len == 2
     check results["names"][0].getStr() == "crew"
-    check results["scores"][0].getInt() == 3
+    check results["scores"][0].getInt() == 0
     check not results["win"][0].getBool()
     check results["tasks"][0].getInt() == 2
     check results["kills"][0].getInt() == 0
     check results["imposter"][0].getInt() == 0
     check results["crew"][0].getInt() == 1
     check results["names"][1].getStr() == "imposter"
-    check results["scores"][1].getInt() == 5 + WinReward
+    check results["scores"][1].getInt() == 1
     check results["win"][1].getBool()
     check results["tasks"][1].getInt() == 0
     check results["kills"][1].getInt() == 1
@@ -628,14 +630,14 @@ suite "stats":
     let results = parseJson(sim.playerResultsJson())
     check results["names"].len == 2
     check results["names"][0].getStr() == "crew"
-    check results["scores"][0].getInt() == 3
+    check results["scores"][0].getInt() == 0
     check not results["win"][0].getBool()
     check results["tasks"][0].getInt() == 0
     check results["kills"][0].getInt() == 0
     check results["imposter"][0].getInt() == 0
     check results["crew"][0].getInt() == 1
     check results["names"][1].getStr() == "imposter"
-    check results["scores"][1].getInt() == 5 + WinReward
+    check results["scores"][1].getInt() == 1
     check results["win"][1].getBool()
     check results["tasks"][1].getInt() == 0
     check results["kills"][1].getInt() == 1
@@ -661,6 +663,8 @@ suite "stats":
     sim.tallyVotes(timedOut = true)
 
     let results = parseJson(sim.playerResultsJson())
+    # The vote-out does not by itself end the game here, so no winner is decided
+    # and every win-point is 0.
     check results["names"][0].getStr() == "player-vote"
     check results["scores"][0].getInt() == 0
     check results["vote_players"][0].getInt() == 1
@@ -672,7 +676,7 @@ suite "stats":
     check results["vote_skip"][1].getInt() == 1
     check results["vote_timeout"][1].getInt() == 0
     check results["names"][2].getStr() == "timeout"
-    check results["scores"][2].getInt() == VoteTimeoutPenalty
+    check results["scores"][2].getInt() == 0
     check results["vote_players"][2].getInt() == 0
     check results["vote_skip"][2].getInt() == 0
     check results["vote_timeout"][2].getInt() == 1
@@ -734,14 +738,14 @@ suite "stats":
     let results = parseJson(sim.playerResultsJson())
     check results["names"].len == 2
     check results["names"][0].getStr() == "crew"
-    check results["scores"][0].getInt() == 3
+    check results["scores"][0].getInt() == 0
     check not results["win"][0].getBool()
     check results["tasks"][0].getInt() == 1
     check results["kills"][0].getInt() == 0
     check results["imposter"][0].getInt() == 0
     check results["crew"][0].getInt() == 1
     check results["names"][1].getStr() == "imposter"
-    check results["scores"][1].getInt() == 5
+    check results["scores"][1].getInt() == 0
     check not results["win"][1].getBool()
     check results["tasks"][1].getInt() == 0
     check results["kills"][1].getInt() == 1

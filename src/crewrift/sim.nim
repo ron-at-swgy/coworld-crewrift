@@ -2549,7 +2549,6 @@ proc playerResultsJson*(sim: SimServer): string =
           slotConfig.name
         else:
           "player-" & $slotIndex
-      reward = 0
       playerRole = Crewmate
       hasRole = false
       playerWon = false
@@ -2563,7 +2562,6 @@ proc playerResultsJson*(sim: SimServer): string =
     if accountIndex >= 0:
       let account = sim.rewardAccounts[accountIndex]
       name = account.address
-      reward = account.reward
       playerRole = account.role
       hasRole = account.hasRole
       playerWon = account.won
@@ -2577,16 +2575,19 @@ proc playerResultsJson*(sim: SimServer): string =
     if playerIndex >= 0:
       let player = sim.players[playerIndex]
       name = player.address
-      if accountIndex < 0:
-        reward = player.reward
       playerRole = player.role
       hasRole = true
-      playerWon = not sim.timeLimitReached and player.role == sim.winner
+      playerWon =
+        sim.phase == GameOver and not sim.timeLimitReached and
+        player.role == sim.winner
     if not hasRole and slotConfig.hasRole:
       playerRole = slotConfig.role
       hasRole = true
     names.add(%name)
-    scores.add(%reward)
+    # Per-episode score is a pure win point: 1 when this slot's side (imposter or
+    # crew) won the episode, 0 otherwise. The accumulated ``reward`` magnitude is
+    # NOT scored — it stays available via the reward packet / player stats only.
+    scores.add(%(if playerWon: 1 else: 0))
     win.add(%playerWon)
     tasksList.add(%tasks)
     killsList.add(%kills)
