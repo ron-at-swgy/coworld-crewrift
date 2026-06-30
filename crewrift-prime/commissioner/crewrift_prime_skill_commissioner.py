@@ -1090,6 +1090,8 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 score=snapshot.score,
                 rounds_played=snapshot.rounds_played,
                 policy_version_ids=snapshot.policy_version_ids,
+                episode_wins=snapshot.episode_wins,
+                episodes_played=snapshot.episodes_played,
             )
             for snapshot in snapshots
             if snapshot.player_id is not None
@@ -1306,6 +1308,13 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                     rounds_played=rounds_played.get(player_id, 0),
                     policy_version_ids=set(pvids_by_player.get(player_id, set())),
                     recent_rounds=recent(player_id),
+                    # All-time episode totals across ALL completed rounds (NOT the
+                    # recent-rounds strip). These are the Competition Win %
+                    # numerator/denominator that the client now reads directly, so
+                    # a player who won episodes only outside the last-20 window
+                    # still surfaces a nonzero win rate.
+                    episode_wins=wins_total.get(player_id, 0.0),
+                    episodes_played=episodes_total.get(player_id, 0),
                 )
             )
         return snapshots
@@ -1445,6 +1454,17 @@ def _win_rate_leaderboard(
             CommissionerDivisionLeaderboardColumn(
                 key="rounds_played", label="Rounds Played", value_type="integer"
             ),
+            # All-time episode totals (Competition Win % = episode_wins /
+            # episodes_played). Carried as columns/values so the platform persists
+            # them verbatim into division.leaderboard_config and the backend can
+            # surface them on LeaderboardEntryPublic for the client to compute an
+            # all-rounds (not last-20) win rate.
+            CommissionerDivisionLeaderboardColumn(
+                key="episode_wins", label="Episode Wins", value_type="number"
+            ),
+            CommissionerDivisionLeaderboardColumn(
+                key="episodes_played", label="Episodes Played", value_type="integer"
+            ),
         ],
         rows=[
             CommissionerDivisionLeaderboardRow(
@@ -1453,11 +1473,21 @@ def _win_rate_leaderboard(
                 subject_name=entry.player_name,
                 values={
                     "rank": entry.rank,
+                    # True per-player WIN % (PR side): episodes_won / episodes_played,
+                    # clamped to [0, 1]; the Observatory UI renders this verbatim.
                     "win_rate": _metrics(entry.player_id)[2],
                     "score": entry.score,
                     "wins": _metrics(entry.player_id)[0],
-                    "episodes_played": _metrics(entry.player_id)[1],
                     "rounds_played": entry.rounds_played,
+                    # All-time episode totals (master side). ``episode_wins`` /
+                    # ``episodes_played`` are the Competition Win % numerator /
+                    # denominator carried verbatim into division.leaderboard_config
+                    # so the backend can compute an all-rounds (not last-20) rate.
+                    # ``episode_wins`` equals ``wins`` (both are wins_total) and
+                    # ``episodes_played`` matches ``_metrics(...)[1]``; populated
+                    # once from the entry so both code paths stay in lockstep.
+                    "episode_wins": entry.episode_wins,
+                    "episodes_played": entry.episodes_played,
                 },
                 policy_version_ids=entry.policy_version_ids,
                 recent_rounds=entry.recent_rounds,
