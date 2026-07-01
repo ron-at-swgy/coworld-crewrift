@@ -7,7 +7,7 @@
 #                        ~/.softmax/credentials.yaml, NOT from this env var, so the
 #                        workflow seeds it headlessly via `softmax set-token`.
 #
-# coworld CLI version: 0.1.26 (public PyPI, requires Python 3.11-3.12; we use 3.12).
+# coworld CLI version: 0.1.27 (public PyPI, requires Python 3.11-3.12; we use 3.12).
 name: "Deploy Crewrift Game"
 
 on:
@@ -44,7 +44,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install coworld CLI
-        run: uv pip install --system coworld==0.1.26
+        run: uv pip install --system coworld==0.1.27
 
       - uses: docker/setup-buildx-action@v3
 
