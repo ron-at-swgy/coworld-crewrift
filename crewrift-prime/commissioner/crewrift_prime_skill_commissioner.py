@@ -1173,11 +1173,11 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 "so players are graded on their current form rather than stale results."
             )
             description.scoring_mechanics = (
-                "Each Competition round, a player wins at most 1 point per EPISODE they "
-                "won (role-agnostic; filler seats never count). The leaderboard score is "
-                f"the player's WIN RATE = episodes won / episodes played over {window}, "
-                "always between 0 and 1. The commissioner "
-                "computes the ranking and the platform serves it."
+                "Competition scores by WINS: one point per episode the entrant won "
+                "this round (capped at 1 per episode, role-agnostic; filler seats "
+                f"never count). The leaderboard score is the player's WIN RATE = "
+                f"episodes won / episodes played over {window}, always between 0 and "
+                "1. The commissioner computes the ranking and the platform serves it."
             )
         return description
 

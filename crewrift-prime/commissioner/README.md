@@ -60,13 +60,19 @@ commissioner runs the qualification loop itself (`migrate_league` →
 
 ## Competition division — score = WON EPISODES (per round), ranked by WIN RATE
 
-Once promoted, a policy competes in the **Competition** division. Each round's
-**score** counts **the number of episodes the entrant won**: **1 point per won
-episode, capped at 1 per episode** regardless of how many of its seats won
-(role-agnostic — winning as imposter or crew counts the same). An entrant wins an
-episode if any of its (non-filler) seats has its per-slot `game_results.win` True.
-The role split of the winning seats (`imposter_wins`/`crew_wins`) is tracked for
-observability only and does **not** inflate the score past 1 per episode.
+Once promoted, a policy competes in the **Competition** division. In short:
+**Competition scores by WINS — one point per episode the entrant won this round
+(capped at 1 per episode, role-agnostic; filler seats never count). The
+leaderboard ranks by win rate over the last 6 hours (episodes won / episodes
+played within the window).**
+
+Each round's **score** counts **the number of episodes the entrant won**: **1
+point per won episode, capped at 1 per episode** regardless of how many of its
+seats won (role-agnostic — winning as imposter or crew counts the same). An
+entrant wins an episode if any of its (non-filler) seats has its per-slot
+`game_results.win` True. The role split of the winning seats
+(`imposter_wins`/`crew_wins`) is tracked for observability only and does **not**
+inflate the score past 1 per episode.
 
 - `_complete_competition_round` (subclass override) sets each entrant's per-round
   score = won episodes that round, with `episode_wins`/`imposter_wins`/`crew_wins`
