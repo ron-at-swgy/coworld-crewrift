@@ -308,7 +308,16 @@ class LeaderboardFlipRegressionTest(unittest.TestCase):
         retried = commissioner.complete_round_for_round_start(
             rs, episode_results=[episode], scheduled_episodes=[], failed_episodes=[]
         )
-        self.assertEqual(retried.state[_WIN_HISTORY_STATE_KEY], history_after_first)
+        # Idempotent up to the wall-clock ``recorded_at`` stamp (which is captured
+        # fresh each run when the retry starts from the same pre-round state): the
+        # same round contributes the SAME set of scored rows, never a doubled list.
+        def _without_recorded_at(rows: list) -> list:
+            return [{k: v for k, v in row.items() if k != "recorded_at"} for row in rows]
+
+        self.assertEqual(
+            _without_recorded_at(retried.state[_WIN_HISTORY_STATE_KEY]),
+            _without_recorded_at(history_after_first),
+        )
 
 
 class EveryParticipantVisibleTest(unittest.TestCase):
