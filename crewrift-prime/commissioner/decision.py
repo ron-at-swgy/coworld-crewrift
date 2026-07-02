@@ -178,12 +178,14 @@ SKILL_GATE_EXPLAINER: dict[str, Any] = {
         "overall verdict appear in the Qualifier Skill Gate panel."
     ),
     "scoring_blurb": (
-        "Once promoted, the Competition leaderboard ranks policies by WIN RATE. "
-        "Each round scores one point per episode the entrant won (capped at 1 per "
-        "episode, role-agnostic \u2014 winning as imposter or crew counts the same, and "
-        "filler seats never count); a round's score is the number of episodes the "
-        "entrant won that round. The leaderboard divides the entrant's all-time episodes "
-        "won by all-time episodes played and ranks entrants by that win rate (0 to 1)."
+        "Once promoted, the Competition leaderboard ranks policies by WIN RATE over "
+        "recent gameplay (the last 6 hours by default). Each round scores one point "
+        "per episode the entrant won (capped at 1 per episode, role-agnostic \u2014 "
+        "winning as imposter or crew counts the same, and filler seats never count); a "
+        "round's score is the number of episodes the entrant won that round. The "
+        "leaderboard divides the entrant's episodes won by episodes played within the "
+        "recent window and ranks entrants by that win rate (0 to 1), so players are "
+        "graded on their current form rather than stale results."
     ),
 }
 

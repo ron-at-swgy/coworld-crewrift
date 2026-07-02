@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -136,6 +137,41 @@ COMPETITION_VARIANT = "default"
 _COMPETITION_DIVISION_TYPE = "competition"
 # result_metadata score kind tag for Competition win-count rounds.
 _COMPETITION_SCORE_KIND = "competition_wins"
+
+# --- Standings recency window (2026-07-02) -----------------------------------
+# The main Competition "Standings" board grades players on RECENT merit only:
+# every player keeps improving their submitted policy, so a policy should be
+# judged on how it does NOW, not on stale rounds it won days ago. Only rounds
+# whose gameplay completed within the last ``STANDINGS_WINDOW_HOURS`` hours count
+# toward the standings win rate / cumulative score.
+#
+# Configurable via ``CREWRIFT_PRIME_STANDINGS_WINDOW_HOURS`` (set on the hosted
+# runnable's ``env`` with no rebuild); DEFAULTS to 6 hours. A value of ``0`` (or
+# negative / unparseable) DISABLES the window and reverts to the all-time board.
+# The window applies ONLY to the Competition Standings the commissioner owns
+# (``rank_division`` scheduling-tick board + the ``_complete_competition_round``
+# round-complete board — both publish the SAME board via ``_win_total_board``).
+# The other Observatory tabs (Rich table / Distribution / Spread / Live) are
+# rendered by the separate web app and are NOT affected by this constant.
+def _standings_window_hours() -> float:
+    raw = os.getenv("CREWRIFT_PRIME_STANDINGS_WINDOW_HOURS")
+    if raw is None or not raw.strip():
+        return 6.0
+    try:
+        return float(raw)
+    except ValueError:
+        return 6.0
+
+
+STANDINGS_WINDOW_HOURS = _standings_window_hours()
+# ISO-8601 timestamp recorded on each per-round win-history row so the
+# round-complete publishing path can apply the SAME recency window as
+# ``rank_division`` (which reads the round snapshots' real timestamps). Rows
+# persisted before this field existed lack it and are treated as in-window
+# (never silently dropped) for backward compatibility.
+_WIN_HISTORY_RECORDED_AT_KEY = "recorded_at"
+
+
 # commissioner-state key holding the append-only per-round win history (one entry
 # per scored policy per round) so ``_complete_competition_round`` can aggregate the
 # full division history and publish the SAME win-rate board ``rank_division``
@@ -1028,6 +1064,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         # must not double-count its results into the cumulative total.
         already_recorded = any(row.get("round_id") == round_id_str for row in history)
         if not already_recorded:
+            recorded_at = _now_utc().isoformat()
             for entry in rankings:
                 tainted = (
                     int(entry.result_metadata.get(RANKED_SCORE_COUNT_METADATA_KEY, 1)) <= 0
@@ -1049,19 +1086,32 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                         if tainted
                         else int(entry.result_metadata.get(COMPLETED_EPISODE_COUNT_METADATA_KEY, 0)),
                         "tainted": tainted,
+                        # Wall-clock time this round was scored, so the standings
+                        # recency window (see rank_division) can be applied here too
+                        # and both publishing paths keep the SAME windowed board.
+                        _WIN_HISTORY_RECORDED_AT_KEY: recorded_at,
                     }
                 )
         state[_WIN_HISTORY_STATE_KEY] = history
 
+        # STANDINGS RECENCY WINDOW: consider only history rows whose round was
+        # scored within the last STANDINGS_WINDOW_HOURS hours, mirroring the
+        # per-round timestamp filter ``rank_division`` applies to ``completed_rounds``
+        # — so the scheduling-tick board and this round-complete board stay identical
+        # (no flip) while both grade on recent merit only. Rows persisted before the
+        # timestamp field existed lack it and are treated as in-window (kept).
+        cutoff = _standings_window_cutoff()
+        windowed_history = [row for row in history if _history_row_in_window(row, cutoff)]
+
         # Best per-round win score per player + the player's policy versions, then
         # collapse to the all-time win-rate board with the shared helper. Every
-        # player in the history is a participant (tainted rows included) so nobody
-        # is dropped; tainted rows just don't feed the win rate.
+        # player in the windowed history is a participant (tainted rows included) so
+        # nobody in-window is dropped; tainted rows just don't feed the win rate.
         round_score: dict[tuple[Any, Any], float] = {}
         round_episodes: dict[tuple[Any, Any], int] = {}
         pvids_by_player: dict[Any, set] = {}
         participants: set = set()
-        for row in history:
+        for row in windowed_history:
             player_id = row["player_id"]
             participants.add(player_id)
             pvids_by_player.setdefault(player_id, set()).add(UUID(row["policy_version_id"]))
@@ -1111,29 +1161,40 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         commissioner no longer uses."""
         description = super().describe_division(ctx)
         if str(getattr(ctx.division, "type", "")) == _COMPETITION_DIVISION_TYPE:
+            window = (
+                f"the last {STANDINGS_WINDOW_HOURS:g} hours of gameplay"
+                if STANDINGS_WINDOW_HOURS > 0
+                else "all rounds"
+            )
             description.leaderboard_rules = (
-                "Players are ranked by their all-time WIN RATE across all rounds — the "
+                f"Players are ranked by their WIN RATE over {window} — the "
                 "fraction of episodes they won (0 to 1). A player's row aggregates their "
-                "policy versions' won and played episodes."
+                "policy versions' won and played episodes. Only recent gameplay counts, "
+                "so players are graded on their current form rather than stale results."
             )
             description.scoring_mechanics = (
                 "Each Competition round, a player wins at most 1 point per EPISODE they "
                 "won (role-agnostic; filler seats never count). The leaderboard score is "
-                "the player's WIN RATE = total episodes won / total episodes played, "
-                "accumulated all-time and always between 0 and 1. The commissioner "
+                f"the player's WIN RATE = episodes won / episodes played over {window}, "
+                "always between 0 and 1. The commissioner "
                 "computes the ranking and the platform serves it."
             )
         return description
 
     def rank_division(self, ctx: DivisionLeaderboardContext) -> list[DivisionLeaderboardSnapshot]:
-        """Competition leaderboard = all-time WIN RATE, collapsed to player.
+        """Competition leaderboard = recent-window WIN RATE, collapsed to player.
 
         Each player's score is the fraction of episodes they won across the
-        division's completed rounds: total episodes won / total episodes played
-        (one point per won episode, capped per episode, fillers excluded — see
-        ``_complete_competition_round``). The score is always in ``[0, 1]``.
-        Players are ranked by descending win rate; ``rounds_played`` is the number
-        of completed rounds the player participated in.
+        division's completed rounds WITHIN THE STANDINGS RECENCY WINDOW (default
+        the last 6 hours of gameplay; see ``STANDINGS_WINDOW_HOURS``): episodes won
+        / episodes played (one point per won episode, capped per episode, fillers
+        excluded — see ``_complete_competition_round``). The score is always in
+        ``[0, 1]``. Players are ranked by descending win rate; ``rounds_played`` is
+        the number of in-window completed rounds the player participated in. Only
+        recent rounds count, so players are graded on current form rather than
+        stale wins (a policy that has since been improved is not carried by old
+        results). Setting ``CREWRIFT_PRIME_STANDINGS_WINDOW_HOURS=0`` reverts to the
+        all-time board.
 
         The board is PLAYER-keyed: a player's policy versions are aggregated into
         one row (their wins summed). Matching/seeding is out of scope here — the
@@ -1147,7 +1208,16 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         if not ctx.completed_rounds or not ctx.round_results:
             return []
 
-        completed_ids = {round_row.id for round_row in ctx.completed_rounds}
+        # STANDINGS RECENCY WINDOW: only rounds whose gameplay completed within the
+        # last STANDINGS_WINDOW_HOURS hours count toward the standings, so players
+        # are graded on recent merit (default 6h; disabled when the window is 0).
+        # Filtering the completed-round id set here is the single, least-invasive
+        # seam — every score below is gated on ``result.round_id in completed_ids``.
+        completed_ids = _rounds_within_standings_window(
+            ctx.completed_rounds, _standings_window_cutoff()
+        )
+        if not completed_ids:
+            return []
         name_by_player: dict[Any, str | None] = {}
         # Every player that appears in a completed round's results — INCLUDING rows
         # gated out below as tainted/unranked. A player who participated but has no
@@ -1339,6 +1409,79 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         ranks_by = {key: r.rank for key, r in best.items()}
         scores_by = {key: r.score for key, r in best.items()}
         return ranks_by, scores_by
+
+
+def _now_utc() -> datetime:
+    """Wall-clock now (UTC). Isolated so tests can reason about the window edge."""
+    return datetime.now(UTC)
+
+
+def _standings_window_cutoff(now: datetime | None = None) -> datetime | None:
+    """The earliest gameplay time that still counts toward the Standings.
+
+    Returns ``now - STANDINGS_WINDOW_HOURS`` (UTC), or ``None`` when the window is
+    disabled (``STANDINGS_WINDOW_HOURS <= 0``) — meaning the all-time board.
+    """
+    if STANDINGS_WINDOW_HOURS <= 0:
+        return None
+    return (now or _now_utc()) - timedelta(hours=STANDINGS_WINDOW_HOURS)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Coerce a (possibly naive) datetime to timezone-aware UTC; pass through None."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _round_effective_time(round_row: Any) -> datetime | None:
+    """The time a round's gameplay happened: completed_at, else started_at, else created_at."""
+    for attr in ("completed_at", "started_at", "created_at"):
+        ts = _as_utc(getattr(round_row, attr, None))
+        if ts is not None:
+            return ts
+    return None
+
+
+def _history_row_in_window(row: dict[str, Any], cutoff: datetime | None) -> bool:
+    """Whether a persisted win-history row falls within the standings recency window.
+
+    With the window disabled (``cutoff is None``) every row is kept. A row that
+    predates the recorded-at field (legacy state) is KEPT rather than dropped, so
+    upgrading the commissioner never silently blanks an in-flight board.
+    """
+    if cutoff is None:
+        return True
+    raw = row.get(_WIN_HISTORY_RECORDED_AT_KEY)
+    if not raw:
+        return True
+    try:
+        recorded = _as_utc(datetime.fromisoformat(str(raw)))
+    except ValueError:
+        return True
+    return recorded is None or recorded >= cutoff
+
+
+def _rounds_within_standings_window(
+    completed_rounds: list[Any], cutoff: datetime | None
+) -> set:
+    """Ids of completed rounds whose gameplay falls within the recency window.
+
+    With the window disabled (``cutoff is None``) every completed round is kept
+    (all-time board). A round with no resolvable timestamp is KEPT (we never drop
+    a real round just because its timestamps are missing).
+    """
+    ids = set()
+    for round_row in completed_rounds:
+        if cutoff is None:
+            ids.add(round_row.id)
+            continue
+        ts = _round_effective_time(round_row)
+        if ts is None or ts >= cutoff:
+            ids.add(round_row.id)
+    return ids
 
 
 def _clamped_win_rate(wins: float, episodes_played: int) -> float:

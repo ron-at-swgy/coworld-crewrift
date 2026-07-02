@@ -74,8 +74,12 @@ observability only and does **not** inflate the score past 1 per episode.
   `COMMISSIONER_DECISION {"decision":"COMPETITION_WINS", ...}` line is logged per
   entrant.
 - `rank_division` (subclass override) ranks the Competition leaderboard by each
-  player's **all-time win rate** across all completed rounds — total episodes won
-  divided by total episodes played, always a number between 0 and 1 — descending.
+  player's **recent win rate** across the completed rounds **whose gameplay
+  happened in the last 6 hours** (`STANDINGS_WINDOW_HOURS`, env-overridable via
+  `CREWRIFT_PRIME_STANDINGS_WINDOW_HOURS`; set it to `0` to revert to all-time) —
+  episodes won divided by episodes played within the window, always a number
+  between 0 and 1 — descending. Grading on recent gameplay means a player is
+  judged on its **current** policy, not stale rounds an older submission won.
   A player's row aggregates their policy versions' won and played episodes.
   `_complete_competition_round` publishes the SAME win-rate board on
   `RoundComplete.leaderboards` (built from an append-only per-round win history —
