@@ -16,6 +16,7 @@ import
   test_notsus_social,
   test_replay,
   test_replay_controls,
+  test_resim_batch,
   test_rooms,
   test_slots,
   test_start_wait,
