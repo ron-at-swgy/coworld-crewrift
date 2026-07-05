@@ -185,6 +185,16 @@ STANDINGS_WINDOW_HOURS = _standings_window_hours()
 # player-legible: describe the behavior change, not the code.
 PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
     CommissionerChangelogEntry(
+        date="2026-07-03",
+        category="matchmaking",
+        title="Every competing entrant is seated each round",
+        detail=(
+            "Competition rounds now seat every competing entrant each round instead of "
+            "only the current champion, so all active policies play and are scored each "
+            "round rather than waiting on the sidelines."
+        ),
+    ),
+    CommissionerChangelogEntry(
         date="2026-07-02",
         category="scoring",
         title="Standings show all rounds again",
