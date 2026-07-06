@@ -181,7 +181,8 @@ suite "stats":
     check sim.timeLimitReached
 
     let results = parseJson(sim.playerResultsJson())
-    # scores is the win-point (1 if won, else 0); a connect-timeout slot never wins.
+    # scores is the role-weighted win-point (3 imposter / 1 crew, 0 otherwise);
+    # a connect-timeout slot never wins.
     check results["scores"][0].getInt() == 0
     check results["scores"][1].getInt() == 0
     check results["connect_timeout"][0].getInt() == 0
@@ -595,7 +596,8 @@ suite "stats":
     check results["imposter"][0].getInt() == 0
     check results["crew"][0].getInt() == 1
     check results["names"][1].getStr() == "imposter"
-    check results["scores"][1].getInt() == 1
+    # Imposter episode wins are worth 3 points (crew wins are worth 1).
+    check results["scores"][1].getInt() == 3
     check results["win"][1].getBool()
     check results["tasks"][1].getInt() == 0
     check results["kills"][1].getInt() == 1
@@ -637,7 +639,8 @@ suite "stats":
     check results["imposter"][0].getInt() == 0
     check results["crew"][0].getInt() == 1
     check results["names"][1].getStr() == "imposter"
-    check results["scores"][1].getInt() == 1
+    # Imposter episode wins are worth 3 points (crew wins are worth 1).
+    check results["scores"][1].getInt() == 3
     check results["win"][1].getBool()
     check results["tasks"][1].getInt() == 0
     check results["kills"][1].getInt() == 1
