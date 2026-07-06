@@ -18,7 +18,8 @@ results ourselves -> new image. We go further: we own the xp-request client
 (``xp_request_client.py``) so the "submit -> run xp request -> read results JSON
 -> promote" loop lives entirely in the commissioner. The qualifier reads the
 game's own end-of-episode ``results`` artifact (the seat-indexed
-``results_schema`` the platform stores per job at ``/jobs/{job_id}/artifacts/results``)
+``results_schema`` served at ``/v2/episode-requests/{ereq_id}/artifacts/results``,
+with the team-member-gated ``/jobs/{job_id}/artifacts/results`` as fallback)
 — the SAME shape the Competition path already consumes from
 ``EpisodeResult.game_results`` — so no replay download or Nim re-expansion is
 needed. The Competition division and its win-count scoring are reused.
@@ -1091,12 +1092,14 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
     ) -> tuple[dict | None, str | None]:
         """Build a game_results dict from the first completed episode's results JSON.
 
-        Reads the game's own end-of-episode ``results`` artifact
-        (``GET /jobs/{job_id}/artifacts/results`` via
-        :meth:`XpRequestClient.get_episode_results`) — the seat-indexed
-        ``results_schema`` payload (``scores``/``win``/``tasks``/``kills``
-        /``imposter``/``crew``/``vote_players``/``vote_skip``/``vote_timeout``)
-        that :func:`decision.evaluate_combined_game` consumes. NO replay download
+        Reads the game's own end-of-episode ``results`` artifact via
+        :meth:`XpRequestClient.get_episode_results` — the episode-request route
+        (``GET /v2/episode-requests/{ereq_id}/artifacts/results``) first, with the
+        team-member-gated job route (``GET /jobs/{job_id}/artifacts/results``) as a
+        fallback — the seat-indexed ``results_schema`` payload
+        (``scores``/``win``/``tasks``/``kills``/``imposter``/``crew``
+        /``vote_players``/``vote_skip``/``vote_timeout``) that
+        :func:`decision.evaluate_combined_game` consumes. NO replay download
         or Nim re-expansion is involved.
 
         Returns ``(game_results, None)`` on success, ``(None, error)`` when a
@@ -1109,11 +1112,13 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
             return None, None
         last_error: str | None = None
         for episode in completed:
-            if not episode.job_id:
-                last_error = f"completed episode {episode.id} has no job_id"
+            if not episode.job_id and not episode.id:
+                last_error = f"completed episode {episode.id} has no job_id or episode-request id"
                 continue
             try:
-                game_results = self._xp_request_client().get_episode_results(episode.job_id)
+                game_results = self._xp_request_client().get_episode_results(
+                    episode.job_id or "", episode_request_id=episode.id or None
+                )
             except XpRequestInfraError as exc:
                 last_error = f"results fetch failed for {episode.id}: {exc}"
                 continue
