@@ -94,6 +94,10 @@ const
   TaskReward* = 1
   KillReward* = 10
   WinReward* = 100
+  # Per-episode win points reported in the results JSON ``scores`` array:
+  # imposter wins are worth more because imposters are outnumbered.
+  ImposterWinPoints* = 3
+  CrewWinPoints* = 1
   VoteTimeoutPenalty* = -10
   StuckPenalty* = -1
   ConnectionTimeoutPenalty* = -100
@@ -2584,10 +2588,18 @@ proc playerResultsJson*(sim: SimServer): string =
       playerRole = slotConfig.role
       hasRole = true
     names.add(%name)
-    # Per-episode score is a pure win point: 1 when this slot's side (imposter or
-    # crew) won the episode, 0 otherwise. The accumulated ``reward`` magnitude is
+    # Per-episode score is a pure win point weighted by role: ImposterWinPoints
+    # (3) when this slot won the episode as an imposter, CrewWinPoints (1) when
+    # it won as crew, 0 otherwise. The accumulated ``reward`` magnitude is
     # NOT scored — it stays available via the reward packet / player stats only.
-    scores.add(%(if playerWon: 1 else: 0))
+    let winPoints =
+      if not playerWon:
+        0
+      elif hasRole and playerRole == Imposter:
+        ImposterWinPoints
+      else:
+        CrewWinPoints
+    scores.add(%winPoints)
     win.add(%playerWon)
     tasksList.add(%tasks)
     killsList.add(%kills)
