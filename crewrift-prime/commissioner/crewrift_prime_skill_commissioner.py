@@ -186,6 +186,19 @@ STANDINGS_WINDOW_HOURS = _standings_window_hours()
 # player-legible: describe the behavior change, not the code.
 PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
     CommissionerChangelogEntry(
+        date="2026-07-06",
+        category="overview",
+        title="League update through Jul 6",
+        detail=(
+            "Game episode scores are now role-weighted (3 imposter / 1 crew) and crew "
+            "time-limit wins score correctly. Competition uses 36-episode rounds with "
+            "role-weighted round scores, enforced $10/pod/episode LLM caps, fair "
+            "matchmaking (all entrants seated, anti-collusion seating, one policy per "
+            "player), void/filler exclusion, and all-time win-rate standings with true "
+            "WIN % on the board. See crewrift-prime/CHANGELOG.md for the full list."
+        ),
+    ),
+    CommissionerChangelogEntry(
         date="2026-07-05",
         category="scoring",
         title="Imposter wins now score 3 points",
@@ -194,6 +207,17 @@ PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
             "points and an episode won as crew scores 1 point (each episode still "
             "scores at most once). The Standings win rate is unchanged — it keeps "
             "counting a won episode once regardless of role."
+        ),
+    ),
+    CommissionerChangelogEntry(
+        date="2026-07-05",
+        category="scoring",
+        title="Crew time-limit wins now score 1 point",
+        detail=(
+            "When crewmates win by outlasting imposters until the tick limit, the "
+            "game now awards a crew win (1 point in episode results). Previously "
+            "these endings were treated as draws and every seat scored 0 — which "
+            "was wrong because most crew wins in production end exactly this way."
         ),
     ),
     CommissionerChangelogEntry(
@@ -229,6 +253,27 @@ PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
     ),
     CommissionerChangelogEntry(
         date="2026-07-02",
+        category="matchmaking",
+        title="Anti-collusion seating",
+        detail=(
+            "A player is seated at most once per episode even when they have multiple "
+            "policy versions submitted, and the same policy is never placed at two "
+            "seats in one game. This closes a loophole where one player could control "
+            "multiple seats and collude with themselves."
+        ),
+    ),
+    CommissionerChangelogEntry(
+        date="2026-07-02",
+        category="eligibility",
+        title="One policy per player in Competition",
+        detail=(
+            "Each player may have at most one active policy in the Competition "
+            "division. When a newer policy qualifies, older versions from the same "
+            "player are retired automatically."
+        ),
+    ),
+    CommissionerChangelogEntry(
+        date="2026-07-02",
         category="scoring",
         title="Standings show all rounds again",
         detail=(
@@ -246,6 +291,16 @@ PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
             "Disconnected or void games in which every player policy scored 0 are "
             "excluded from wins and episodes played, so an infrastructure failure can "
             "no longer drag down a player's win rate."
+        ),
+    ),
+    CommissionerChangelogEntry(
+        date="2026-06-30",
+        category="scoring",
+        title="Competition board shows true win rate",
+        detail=(
+            "Standings rank by win rate (episodes won / episodes played), not MMR. "
+            "The board publishes explicit per-player WIN %, all-time win and played "
+            "totals, and a cumulative role-weighted round-score column."
         ),
     ),
     CommissionerChangelogEntry(

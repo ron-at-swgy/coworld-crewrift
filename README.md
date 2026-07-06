@@ -30,6 +30,9 @@ of the ready-to-deploy default policies in
 
 - **▶ How to play Crewrift Prime:** **[`play_crewrift_prime.md`](play_crewrift_prime.md)** —
   the deploy + optimize fast path (**[`play.md`](play.md)** is an alias of it).
+- **Changelog:** **[`crewrift-prime/CHANGELOG.md`](crewrift-prime/CHANGELOG.md)** —
+  recent game, commissioner, and league updates (also surfaced in the Observatory
+  under League Overview → Commissioner Changelog after deploy).
 - Commissioner internals & rules of record:
   [`crewrift-prime/commissioner/README.md`](crewrift-prime/commissioner/README.md).
 
