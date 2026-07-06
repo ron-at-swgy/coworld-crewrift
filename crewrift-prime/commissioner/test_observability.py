@@ -140,7 +140,7 @@ class _FakeXpClient:
             raise self._filler_error
         return list(self._filler_ids)
 
-    def get_episode_results(self, job_id: str) -> dict:
+    def get_episode_results(self, job_id: str, *, episode_request_id: str | None = None) -> dict:
         self.results_lookups.append(str(job_id))
         if self._results_error is not None:
             raise self._results_error

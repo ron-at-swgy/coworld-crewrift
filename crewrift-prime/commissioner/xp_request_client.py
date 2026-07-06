@@ -8,7 +8,9 @@ new policy is submitted to the league, the commissioner uses this client to:
   2. POLL it until its child episodes complete (or it fails / times out),
   3. FETCH the child episode rows (``GET .../{xreq}/episodes``), and
   4. READ each completed episode's per-slot results JSON artifact
-     (``GET /jobs/{job_id}/artifacts/results``).
+     (``GET /v2/episode-requests/{ereq_id}/artifacts/results``, falling back to
+     ``GET /jobs/{job_id}/artifacts/results`` — the job route became
+     softmax-team-member-only on 2026-07-06).
 
 The qualifier scores from the game's own end-of-episode ``results`` artifact (the
 seat-indexed ``results_schema`` the platform stores per job), so it no longer
@@ -439,29 +441,58 @@ class XpRequestClient:
             raise XpRequestInfraError(f"episodes for {xreq_id}: unexpected shape {type(rows)}")
         return [EpisodeRow.from_json(row) for row in rows if isinstance(row, dict)]
 
-    def get_episode_results(self, job_id: str) -> dict[str, Any]:
+    def get_episode_results(
+        self, job_id: str, *, episode_request_id: str | None = None
+    ) -> dict[str, Any]:
         """Fetch a completed episode's per-slot results JSON (the game's artifact).
 
         The crewrift game writes a ``results`` artifact at the end of each episode
         — the seat-indexed ``results_schema`` payload (``scores``/``win``/``tasks``
         /``kills``/``imposter``/``crew``/``vote_players``/``vote_skip``
-        /``vote_timeout``/...). The platform stores it on the episode's JOB and
-        serves it at ``GET /jobs/{job_id}/artifacts/results`` (the same endpoint the
-        ``coworld episode-results`` CLI reads). This is the authoritative, already
-        re-simulated source the decision gate needs, so the qualifier consumes it
-        directly instead of downloading + re-expanding the ``.bitreplay``.
+        /``vote_timeout``/...).
 
-        Any HTTP/network/parse failure is normalized to :class:`XpRequestInfraError`
-        so a completed episode whose results artifact is momentarily unavailable
-        HOLDS for retry rather than disqualifying the policy.
+        Two routes serve it, tried in order:
+
+        1. ``GET /v2/episode-requests/{ereq_id}/artifacts/results`` — the
+           episode-request route, available to any authenticated user (verified
+           live 2026-07-06; returns the identical results_schema dict).
+        2. ``GET /jobs/{job_id}/artifacts/results`` — the job route. As of
+           2026-07-06 the platform gates ALL ``/jobs/{job_id}/...`` artifact
+           routes behind softmax-team membership (HTTP 403 "User is not a softmax
+           team member"), which broke qualifiers for non-team commissioners; it is
+           kept as a fallback in case the ereq route regresses.
+
+        Any HTTP/network/parse failure on both routes is normalized to
+        :class:`XpRequestInfraError` so a completed episode whose results artifact
+        is momentarily unavailable HOLDS for retry rather than disqualifying the
+        policy.
         """
-        if not job_id:
-            raise XpRequestInfraError("episode results: empty job_id")
-        payload = self._get(f"/jobs/{urllib.parse.quote(str(job_id))}/artifacts/results")
+        if not job_id and not episode_request_id:
+            raise XpRequestInfraError("episode results: empty job_id and episode_request_id")
+        errors: list[str] = []
+        if episode_request_id:
+            try:
+                return self._results_payload(
+                    f"/v2/episode-requests/{urllib.parse.quote(str(episode_request_id))}/artifacts/results",
+                    f"episode results for {episode_request_id}",
+                )
+            except XpRequestInfraError as exc:
+                errors.append(str(exc))
+        if job_id:
+            try:
+                return self._results_payload(
+                    f"/jobs/{urllib.parse.quote(str(job_id))}/artifacts/results",
+                    f"episode results for job {job_id}",
+                )
+            except XpRequestInfraError as exc:
+                errors.append(str(exc))
+        raise XpRequestInfraError("; ".join(errors))
+
+    def _results_payload(self, path: str, label: str) -> dict[str, Any]:
+        """GET a results route and require a dict payload (shared by both routes)."""
+        payload = self._get(path)
         if not isinstance(payload, dict):
-            raise XpRequestInfraError(
-                f"episode results for job {job_id}: unexpected shape {type(payload)}"
-            )
+            raise XpRequestInfraError(f"{label}: unexpected shape {type(payload)}")
         return payload
 
     def poll_until_complete(
