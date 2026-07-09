@@ -10,9 +10,22 @@
 # or disqualifies on a genuine non-completion). The Competition division and its
 # win-count scoring are declared here and handled by the subclass.
 #
-# Because only the Competition division is declared, the stock
-# `migration_divisions` (derived from `divisions:`) declares ONLY Competition —
-# the platform migration no longer creates a qualifier/staging division.
+# Three parallel competition divisions are declared (all handled by the subclass):
+#   - Competition ("Both"): the mixed 8-seat game with the game's natural random
+#     role assignment (2 imposters / 6 crew per episode) — measures overall skill.
+#   - Imposters: role-pinned games where the REAL entrants are seated on the two
+#     imposter seats and the six crew seats are filled with default filler
+#     policies — measures which policy is the best IMPOSTER.
+#   - Crew: role-pinned games where the REAL entrants are seated on the crew seats
+#     and the two imposter seats are filled with default filler policies —
+#     measures which policy is the best CREW.
+# The Imposters and Crew divisions draw their entrants from the SAME pool as
+# Competition (every policy competing in Competition), so a policy qualifies once
+# and is automatically graded in all three divisions. See
+# CrewriftPrimeSkillCommissioner for the per-division scheduling/scoring.
+#
+# `migration_divisions` (derived from `divisions:`) declares all three competition
+# divisions; the platform migration no longer creates a qualifier/staging division.
 #
 # Loaded via RULESET_STRATEGY_CONFIG_PATH=/config/crewrift_prime.yaml in the image.
 
@@ -49,5 +62,39 @@ divisions:
     level: 1
     match:
       type: competition
+      name: Competition
     entrants:
       status: competing
+  # Imposter league: real entrants are seated on the imposter seats, crew seats are
+  # filled with default filler policies. Entrants are sourced from the Competition
+  # pool by the subclass scheduler (see _schedule_imposter_round), so the
+  # `entrants` selector here is informational.
+  imposters:
+    name: Imposters
+    level: 2
+    match:
+      type: competition
+      name: Imposters
+    entrants:
+      status: competing
+    min_entries_to_start: 1
+    stage:
+      label: Round
+      episodes: 36
+      min_episodes_per_entrant: 36
+  # Crew league: real entrants are seated on the crew seats, the two imposter seats
+  # are filled with default filler policies. Entrants are sourced from the
+  # Competition pool by the subclass scheduler (see _schedule_crew_round).
+  crew:
+    name: Crew
+    level: 3
+    match:
+      type: competition
+      name: Crew
+    entrants:
+      status: competing
+    min_entries_to_start: 1
+    stage:
+      label: Round
+      episodes: 36
+      min_episodes_per_entrant: 36

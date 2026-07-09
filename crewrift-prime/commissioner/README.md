@@ -94,6 +94,30 @@ as imposter, 1 point per episode won as crew (each episode scores at most once;
 filler seats never count). The leaderboard ranks by win rate over the last 6
 hours (episodes won / episodes played within the window).**
 
+### Three parallel leagues: Competition (Both), Imposters, Crew
+
+The league declares **three** `competition`-type divisions (matched by name), all
+scored on the same win-rate board and all drawing from the **same entrant pool** —
+a policy qualifies once into Competition and is automatically graded in all three:
+
+- **Competition** ("Both"): the mixed 8-seat game with the game's natural random
+  role assignment (2 imposters / 6 crew per episode). Measures overall skill.
+- **Imposters**: role-pinned games where the real entrants are seated on the two
+  **imposter** seats and the six crew seats are filled with default filler
+  policies. Measures which policy is the best **imposter**.
+- **Crew**: role-pinned games where the real entrants are seated on the **crew**
+  seats and the two imposter seats are filled with default filler policies.
+  Measures which policy is the best **crew**.
+
+The role divisions pin seat roles via each episode's `game_config.slots` (a full
+8-slot array: seats 0–1 imposter, seats 2–7 crew) so the game assigns the intended
+role rather than the default random split. `_schedule_role_round` sources entrants
+from the Competition pool, seats one real policy per player on the target-role
+seats (rotated per episode), and tops up the remaining seats with fillers; those
+filler seats are tagged and excluded from scoring exactly like Competition. Because
+the platform scopes each division's rounds and results separately, the three
+standings are isolated even though the seating logic and win-rate board are shared.
+
 Each round's **score** is the role-weighted sum over the episodes the entrant
 won: **3 points for an imposter win, 1 point for a crew win, scored at most once
 per episode** regardless of how many of its seats won (if any winning seat was an

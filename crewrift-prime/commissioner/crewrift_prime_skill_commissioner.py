@@ -107,13 +107,18 @@ from commissioners.common.models import (
     MembershipSnapshot,
     PolicyMembershipEventChange as ModelsPolicyMembershipEventChange,
     PolicyMembershipEventEvidence as ModelsPolicyMembershipEventEvidence,
+    PolicyPoolEntry,
+    RoundSpec,
+    ScheduleContext,
+    V2RoundConfig,
 )
 from commissioners.common.ruleset_strategy.commissioner import RulesetStrategyCommissioner
-from commissioners.common.ruleset_strategy.entrants import select_rule
+from commissioners.common.ruleset_strategy.entrants import division_entries, select_rule
 from commissioners.common.ruleset_strategy.round_start import RoundStartView
 from commissioners.common.utils import (
     COMPLETED_EPISODE_COUNT_METADATA_KEY,
     RANKED_SCORE_COUNT_METADATA_KEY,
+    _current_schedule_slot,
 )
 
 from game_results_loader import coerce_results_schema, has_results_schema_arrays
@@ -147,6 +152,29 @@ COMPETITION_VARIANT = "default"
 _COMPETITION_DIVISION_TYPE = "competition"
 # result_metadata score kind tag for Competition win-count rounds.
 _COMPETITION_SCORE_KIND = "competition_wins"
+
+# --- Role-parallel divisions (2026-07-08) ------------------------------------
+# Alongside the mixed-role Competition division ("Both"), two role-pinned
+# competition divisions grade a policy purely as imposter or purely as crew. All
+# three draw entrants from the SAME Competition pool (a policy qualifies once).
+#
+# The role divisions are matched by their division NAME (the migration creates a
+# distinct DivisionSnapshot per YAML entry, all with type "competition"), so the
+# subclass routes scheduling/scoring/description by name rather than type alone.
+_COMPETITION_DIVISION_NAME = "Competition"
+_IMPOSTERS_DIVISION_NAME = "Imposters"
+_CREW_DIVISION_NAME = "Crew"
+# How the game's role enum labels the two seat roles (see coworld_manifest.json
+# game_config.slots[].role and the results-schema imposter/crew arrays).
+_ROLE_IMPOSTER = "imposter"
+_ROLE_CREW = "crew"
+# The default game has NUM_IMPOSTER_SEATS imposters and the rest crew per episode
+# (coworld_manifest.json default variant `imposterCount: 2`). The role divisions
+# pin exactly this split so the game dispatches identically to Competition.
+NUM_IMPOSTER_SEATS = 2
+NUM_CREW_SEATS = NUM_SEATS - NUM_IMPOSTER_SEATS
+# Episode-request tag marking a role-pinned division round (observability only).
+_ROLE_LEAGUE_TAG = "role_league"
 
 # --- Standings recency window (2026-07-02) -----------------------------------
 # The main Competition "Standings" board can optionally grade players on RECENT
@@ -190,6 +218,21 @@ STANDINGS_WINDOW_HOURS = _standings_window_hours()
 # eligibility, filler handling, void-game handling, ...) changes. Keep entries
 # player-legible: describe the behavior change, not the code.
 PRIME_COMMISSIONER_CHANGELOG: list[CommissionerChangelogEntry] = [
+    CommissionerChangelogEntry(
+        date="2026-07-08",
+        category="scheduling",
+        title="New Imposters and Crew leagues",
+        detail=(
+            "Alongside the mixed Competition league, two role-pinned leagues now "
+            "grade every policy purely as imposter or purely as crew. The Imposters "
+            "league seats the real entrants on the two imposter seats and fills the "
+            "crew seats with default filler policies; the Crew league seats the real "
+            "entrants on the crew seats and fills the imposter seats with fillers. "
+            "All three leagues share the same entrant pool — a policy qualifies once "
+            "into Competition and is automatically graded in all three — and each has "
+            "its own win-rate standings. Filler seats never count."
+        ),
+    ),
     CommissionerChangelogEntry(
         date="2026-07-08",
         category="matchmaking",
@@ -769,9 +812,29 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
 
     # ---- division detection ---------------------------------------------------
 
+    def _division_kind(self, division: Any) -> str | None:
+        """Classify a competition division as ``both`` / ``imposters`` / ``crew``.
+
+        All three role-parallel divisions carry ``type == competition``; they are
+        distinguished by their division NAME (from the YAML ``divisions:`` block).
+        Returns ``None`` for any non-competition division (defers to the stock base).
+        """
+        if str(getattr(division, "type", "")) != _COMPETITION_DIVISION_TYPE:
+            return None
+        name = str(getattr(division, "name", "") or "")
+        if name == _IMPOSTERS_DIVISION_NAME:
+            return "imposters"
+        if name == _CREW_DIVISION_NAME:
+            return "crew"
+        return "both"
+
     def _is_competition_round(self, view: RoundStartView) -> bool:
-        """True for the Competition division — scored by won episodes (3 pts imposter / 1 pt crew)."""
-        return str(getattr(view.current_division, "type", "")) == _COMPETITION_DIVISION_TYPE
+        """True for any of the three competition divisions (Both / Imposters / Crew)."""
+        return self._division_kind(view.current_division) is not None
+
+    def _is_role_division(self, division: Any) -> bool:
+        """True for the role-pinned Imposters/Crew divisions (not the mixed Both)."""
+        return self._division_kind(division) in ("imposters", "crew")
 
     def _competition_variant_id(self, round_start: CommissionerRoundStart) -> str:
         """The full balanced game for Competition, falling back to the first variant."""
@@ -780,15 +843,105 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
             return COMPETITION_VARIANT
         return round_start.variants[0].id if round_start.variants else "default"
 
+    def _role_slots_game_config(self, round_start: CommissionerRoundStart) -> dict[str, Any]:
+        """Full ``slots`` override pinning ``NUM_IMPOSTER_SEATS`` imposters first.
+
+        The game merges an episode's ``game_config`` over the variant's, so we must
+        supply the FULL ``slots`` array (seat order fixed): the first
+        ``NUM_IMPOSTER_SEATS`` seats are imposters and the rest crew. We preserve
+        the variant's per-seat colors/tokens where present so the role override does
+        not clobber the game's cosmetic slot config.
+        """
+        base_slots: list[dict[str, Any]] = []
+        variant = next(
+            (v for v in round_start.variants if v.id == self._competition_variant_id(round_start)),
+            None,
+        )
+        if variant is not None:
+            variant_slots = variant.game_config.get("slots")
+            if isinstance(variant_slots, list):
+                base_slots = [dict(slot) if isinstance(slot, dict) else {} for slot in variant_slots]
+        slots: list[dict[str, Any]] = []
+        for seat in range(NUM_SEATS):
+            slot = dict(base_slots[seat]) if seat < len(base_slots) else {}
+            slot["role"] = _ROLE_IMPOSTER if seat < NUM_IMPOSTER_SEATS else _ROLE_CREW
+            slots.append(slot)
+        return {"slots": slots}
+
     # ---- scheduling -----------------------------------------------------------
+
+    def schedule_rounds(self, ctx: ScheduleContext) -> list[RoundSpec]:
+        """Schedule rounds for all three competition divisions.
+
+        The stock scheduler counts a division's entrants from its OWN memberships,
+        so the role-pinned Imposters/Crew divisions — which carry no memberships of
+        their own (a policy qualifies once into Competition and is graded in all
+        three) — would never get a round. We therefore:
+
+        - schedule the mixed Competition division and any other divisions via the
+          stock scheduler (unchanged), and
+        - additionally schedule the role divisions here, sourcing their entrant list
+          from the SHARED Competition pool. A role round is skipped only when there
+          are no Competition entrants or a round is already pending/running for that
+          division in the current schedule slot (same cadence guard as the stock
+          scheduler).
+        """
+        specs = super().schedule_rounds(ctx)
+        config = self._config()
+        current_slot = _current_schedule_slot(datetime.now(UTC), config)
+
+        competition_division = next(
+            (d for d in ctx.divisions if self._division_kind(d) == "both"), None
+        )
+        if competition_division is None:
+            return specs
+        competition_rule = select_rule(
+            config, competition_division, ctx.active_memberships
+        )
+        competition_entrants = division_entries(
+            competition_division, ctx.active_memberships, competition_rule
+        )
+        if not competition_entrants:
+            return specs
+
+        for division in ctx.divisions:
+            if not self._is_role_division(division):
+                continue
+            division_rounds = [r for r in ctx.recent_rounds if r.division_id == division.id]
+            if any(r.status in ("pending", "claimed", "running") for r in division_rounds):
+                continue
+            latest_round = max(division_rounds, key=lambda r: r.created_at, default=None)
+            if latest_round is not None and latest_round.created_at >= current_slot:
+                continue
+            rule = select_rule(config, division, ctx.active_memberships)
+            stages = rule.stages if rule is not None and rule.stages is not None else config.stages
+            specs.append(
+                RoundSpec(
+                    division_id=division.id,
+                    round_config=V2RoundConfig(
+                        stages=stages,
+                        entrant_policy_version_ids=[
+                            entry.policy_version_id for entry in competition_entrants
+                        ],
+                    ),
+                    execution_backend=config.default_execution_backend,
+                    notes=f"auto-scheduled by {type(self).__name__}:role:{division.name}",
+                )
+            )
+        return specs
 
     def schedule_episodes_for_round_start(
         self, round_start: CommissionerRoundStart
     ) -> CommissionerScheduleEpisodes:
         config = self._config()
         view = RoundStartView(round_start, config)
-        if self._is_competition_round(view):
+        kind = self._division_kind(view.current_division)
+        if kind == "both":
             return self._schedule_competition_round(round_start, view)
+        if kind == "imposters":
+            return self._schedule_role_round(round_start, view, role="imposters")
+        if kind == "crew":
+            return self._schedule_role_round(round_start, view, role="crew")
         # No staging/qualifier rounds exist any more — qualification is event-driven
         # via migrate_league/qualify_submission, not a scheduled self-play round.
         return super().schedule_episodes_for_round_start(round_start)
@@ -962,6 +1115,217 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 _FILLER_SEATS_TAG: ",".join(str(seat) for seat in filler_seats),
                 _FILLER_POLICY_IDS_TAG: ",".join(sorted(filler_policy_ids)),
                 # Per-episode spend cap for each player pod (USD), enforced platform-side.
+                _MAX_SPEND_TAG: f"{MAX_SPEND_PER_POD_USD:g}",
+            },
+        )
+
+    # ---- role-pinned divisions (Imposters / Crew) -----------------------------
+
+    def _competition_entries(self, view: RoundStartView) -> list[PolicyPoolEntry]:
+        """Entrants for a ROLE division, sourced from the COMPETITION pool.
+
+        The Imposters and Crew divisions do not carry their own memberships — a
+        policy qualifies once into Competition and is graded in all three
+        divisions. So a role round's entrant pool is the Competition division's
+        competing memberships, not the (empty) role-division memberships. We locate
+        the Competition division snapshot in this round and reuse the shared
+        ``division_entries`` selection against it.
+        """
+        competition_division = next(
+            (
+                division
+                for division in view.divisions
+                if self._division_kind(division) == "both"
+            ),
+            None,
+        )
+        if competition_division is None:
+            return []
+        rule = select_rule(self._config(), competition_division, view.memberships)
+        entries = division_entries(competition_division, view.memberships, rule)
+        # Honor the round_config's frozen entrant list (set by ``schedule_rounds``
+        # from the Competition pool at round-creation time) so the seating and the
+        # scoring agree on exactly which policies competed this round, even if the
+        # Competition roster changed between round creation and execution.
+        configured_order = view.round_config.get("entrant_policy_version_ids")
+        if isinstance(configured_order, list):
+            order = {
+                UUID(str(policy_id)): index
+                for index, policy_id in enumerate(configured_order)
+            }
+            entries = [entry for entry in entries if entry.policy_version_id in order]
+            entries.sort(key=lambda entry: order[entry.policy_version_id])
+        for index, entry in enumerate(entries):
+            entry.pool_id = view.round_start.round_id
+            entry.seed_order = index
+        return entries
+
+    def _schedule_role_round(
+        self, round_start: CommissionerRoundStart, view: RoundStartView, *, role: str
+    ) -> CommissionerScheduleEpisodes:
+        """Schedule role-pinned 8-seat games for the Imposters or Crew division.
+
+        The real entrants (drawn from the SAME Competition pool as the mixed
+        Competition division) are seated ONLY on the seats of the division's target
+        role, and the OTHER role's seats are filled with default filler policies:
+
+        - ``imposters``: real entrants occupy the ``NUM_IMPOSTER_SEATS`` imposter
+          seats (0..NUM_IMPOSTER_SEATS-1); the ``NUM_CREW_SEATS`` crew seats are
+          fillers.
+        - ``crew``: real entrants occupy the ``NUM_CREW_SEATS`` crew seats
+          (NUM_IMPOSTER_SEATS..NUM_SEATS-1); the ``NUM_IMPOSTER_SEATS`` imposter
+          seats are fillers.
+
+        Roles are pinned via the episode ``game_config`` (a full ``slots`` array —
+        first ``NUM_IMPOSTER_SEATS`` imposter, rest crew) so the game assigns the
+        intended role to every seat rather than the default random split. As in
+        Competition, each PLAYER occupies at most one real seat per episode, the
+        entrant order is shuffled per round and rotated per episode for fair
+        appearances, and filler seats are tagged and excluded from scoring.
+
+        When no fillers are configured, the opposing-role seats fall back to
+        duplicating already-seated real entrants (still excluded from scoring) so
+        the closed roster can dispatch.
+        """
+        entries = self._competition_entries(view)
+        if not entries:
+            return CommissionerScheduleEpisodes(episodes=[])
+        real_role = _ROLE_IMPOSTER if role == "imposters" else _ROLE_CREW
+        real_seat_count = NUM_IMPOSTER_SEATS if role == "imposters" else NUM_CREW_SEATS
+        num_episodes = self._competition_num_episodes(view, len(entries))
+        variant_id = self._competition_variant_id(round_start)
+        game_config = self._role_slots_game_config(round_start)
+        entrant_ids = [entry.policy_version_id for entry in entries]
+        # Same per-round shuffle as Competition (deterministic from round_id), so
+        # role rounds also equalize per-entrant appearances rather than favoring the
+        # middle of the join-order list.
+        _seed = int.from_bytes(
+            hashlib.sha256(f"{role}:{round_start.round_id}".encode()).digest()[:8], "big"
+        )
+        random.Random(_seed).shuffle(entrant_ids)
+        player_by_policy = {
+            entry.policy_version_id: (
+                str(entry.player_id) if entry.player_id is not None else None
+            )
+            for entry in entries
+        }
+        league_id = getattr(round_start.league, "id", None)
+        self._sync_league_spend_limit(league_id)
+        filler_ids = self._filler_policy_version_ids(league_id)
+        episodes = [
+            self._role_episode(
+                round_start=round_start,
+                episode_index=episode_index,
+                role=role,
+                real_role=real_role,
+                real_seat_count=real_seat_count,
+                entrant_ids=entrant_ids,
+                player_by_policy=player_by_policy,
+                filler_ids=filler_ids,
+                variant_id=variant_id,
+                game_config=game_config,
+            )
+            for episode_index in range(num_episodes)
+        ]
+        return CommissionerScheduleEpisodes(episodes=episodes)
+
+    def _role_episode(
+        self,
+        *,
+        round_start: CommissionerRoundStart,
+        episode_index: int,
+        role: str,
+        real_role: str,
+        real_seat_count: int,
+        entrant_ids: list[UUID],
+        player_by_policy: dict[UUID, str | None],
+        filler_ids: list[UUID],
+        variant_id: str,
+        game_config: dict[str, Any],
+    ) -> CommissionerProtocolEpisodeRequest:
+        """Build one role-division episode: real entrants on target-role seats.
+
+        Seats 0..NUM_IMPOSTER_SEATS-1 are the imposter seats and the rest are crew
+        seats (matching ``game_config`` slot roles). The target role's seats are
+        filled first with up to ``real_seat_count`` distinct-player real entrants
+        (rotated per episode), then the OTHER role's seats — and any target-role
+        seats left unfilled because there were fewer than ``real_seat_count`` real
+        players — are topped up with fillers (or duplicated reals when no fillers
+        are configured). Every non-real seat is recorded in ``filler_seats`` and, if
+        a configured filler, in ``filler_policy_version_ids`` so scoring excludes it.
+        """
+
+        def seat_key(policy: UUID) -> str:
+            player = player_by_policy.get(policy)
+            return f"player:{player}" if player is not None else f"policy:{policy}"
+
+        # Real seats of the target role: at most one per player, rotated per episode.
+        real_policies: list[UUID] = []
+        seated_keys: set[str] = set()
+        if entrant_ids:
+            offset = episode_index % len(entrant_ids)
+            rotated = entrant_ids[offset:] + entrant_ids[:offset]
+            for policy in rotated:
+                if len(real_policies) >= real_seat_count:
+                    break
+                key = seat_key(policy)
+                if key in seated_keys:
+                    continue
+                real_policies.append(policy)
+                seated_keys.add(key)
+
+        # Assign the target-role seat indices to the real policies. Imposter seats
+        # are 0..NUM_IMPOSTER_SEATS-1; crew seats are the rest.
+        if real_role == _ROLE_IMPOSTER:
+            target_seats = list(range(0, NUM_IMPOSTER_SEATS))
+        else:
+            target_seats = list(range(NUM_IMPOSTER_SEATS, NUM_SEATS))
+
+        seat_policies: list[UUID | None] = [None] * NUM_SEATS
+        real_seats: list[int] = []
+        for policy, seat in zip(real_policies, target_seats):
+            seat_policies[seat] = policy
+            real_seats.append(seat)
+
+        # Every seat that is not a legitimately-seated real entrant (the opposing
+        # role's seats, plus any target-role seats left empty when fewer than
+        # real_seat_count players are competing) is a filler seat.
+        empty_seats = [seat for seat in range(NUM_SEATS) if seat not in real_seats]
+        topup_is_filler = bool(filler_ids)
+        already_seated = [p for p in seat_policies if p is not None]
+        topup_pool = filler_ids if topup_is_filler else entrant_ids
+        topups = _distinct_topup(
+            topup_pool,
+            already_seated=already_seated,
+            count=len(empty_seats),
+            rotation=episode_index,
+            key=seat_key,
+        )
+        for seat, policy in zip(empty_seats, topups):
+            seat_policies[seat] = policy
+
+        # Defensive: if the pool was empty and _distinct_topup returned nothing,
+        # duplicate an already-seated policy so the closed roster still dispatches.
+        for seat in range(NUM_SEATS):
+            if seat_policies[seat] is None:
+                seat_policies[seat] = already_seated[seat % len(already_seated)]
+
+        resolved = [p for p in seat_policies if p is not None]
+        filler_seats = sorted(empty_seats)
+        filler_policy_ids = (
+            {str(seat_policies[seat]) for seat in filler_seats} if topup_is_filler else set()
+        )
+        return CommissionerProtocolEpisodeRequest(
+            request_id=f"{role}:{round_start.round_id}:{episode_index}",
+            variant_id=variant_id,
+            policy_version_ids=resolved,
+            game_config=game_config,
+            tags={
+                "pool_id": str(round_start.round_id),
+                "competition": "1",
+                _ROLE_LEAGUE_TAG: role,
+                _FILLER_SEATS_TAG: ",".join(str(seat) for seat in filler_seats),
+                _FILLER_POLICY_IDS_TAG: ",".join(sorted(filler_policy_ids)),
                 _MAX_SPEND_TAG: f"{MAX_SPEND_PER_POD_USD:g}",
             },
         )
@@ -1309,8 +1673,16 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         ``episodes_played`` metadata that both publishing paths consume, it applies
         identically to ``rank_division`` and this round-complete board.
         """
-        rule = select_rule(self._config(), view.current_division, view.memberships)
-        entries = view.entries(rule)
+        # Entrants: for the mixed Competition division the roster IS this division's
+        # memberships; for the role-pinned Imposters/Crew divisions the roster is the
+        # SHARED Competition pool (a policy qualifies once and is graded in all three
+        # divisions), so source entrants from Competition there.
+        division_label = str(getattr(view.current_division, "name", "") or "Competition")
+        if self._is_role_division(view.current_division):
+            entries = self._competition_entries(view)
+        else:
+            rule = select_rule(self._config(), view.current_division, view.memberships)
+            entries = view.entries(rule)
         filler_seats_by_request = _filler_seats_by_request(scheduled_episodes)
         filler_policy_ids = _all_filler_policy_ids(scheduled_episodes)
 
@@ -1393,7 +1765,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 {
                     "round_id": str(round_start.round_id),
                     "round_number": round_start.round_number,
-                    "division": "Competition",
+                    "division": division_label,
                     "entrant_policy_version_id": pid,
                     "decision": "COMPETITION_WINS",
                     **rec.to_dict(),
@@ -1443,7 +1815,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 {
                     "round_id": str(round_start.round_id),
                     "round_number": round_start.round_number,
-                    "division": "Competition",
+                    "division": division_label,
                     "decision": "FILLER_POLICIES_EXCLUDED",
                     "filler_policy_version_ids": filler_ids_sorted,
                     "note": (
@@ -1463,7 +1835,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
                 {
                     "round_id": str(round_start.round_id),
                     "round_number": round_start.round_number,
-                    "division": "Competition",
+                    "division": division_label,
                     "decision": "VOID_GAMES_EXCLUDED",
                     "void_games": void_games,
                     "note": (
@@ -1536,6 +1908,15 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         """
         state: dict[str, Any] = dict(incoming_state) if isinstance(incoming_state, dict) else {}
         history: list[dict[str, Any]] = list(state.get(_WIN_HISTORY_STATE_KEY, []))
+        # Best-effort division label for the observability log line (matches the
+        # role-parallel Competition / Imposters / Crew boards).
+        division_label = "Competition"
+        if round_start is not None:
+            match = next(
+                (d for d in round_start.divisions if d.id == division_id), None
+            )
+            if match is not None:
+                division_label = str(getattr(match, "name", "") or "Competition")
         round_id_str = str(round_id)
         # Idempotency: a round is appended exactly once. A retried round-complete
         # must not double-count its results into the cumulative total.
@@ -1641,6 +2022,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
             recent=lambda _pid: None,
             round_episodes=round_episodes,
             participants=participants,
+            division_label=division_label,
         )
         entries = [
             CommissionerDivisionLeaderboardEntry(
@@ -1666,31 +2048,55 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         return leaderboards, state
 
     def describe_division(self, ctx: DivisionDescriptionContext) -> DivisionCommissionerDescriptionPublic:
-        """Inherit the base description, but state the REAL Competition scoring
-        (win rate), since the stock text describes a mean-score EWMA the
-        commissioner no longer uses."""
+        """Inherit the base description, but state the REAL scoring (win rate) for
+        each of the three competition divisions (Both / Imposters / Crew), since the
+        stock text describes a mean-score EWMA the commissioner no longer uses."""
         description = super().describe_division(ctx)
-        if str(getattr(ctx.division, "type", "")) == _COMPETITION_DIVISION_TYPE:
+        kind = self._division_kind(ctx.division)
+        if kind is not None:
             window = (
                 f"the last {STANDINGS_WINDOW_HOURS:g} hours of gameplay"
                 if STANDINGS_WINDOW_HOURS > 0
                 else "all rounds"
             )
+            if kind == "imposters":
+                role_intro = (
+                    "This is the IMPOSTER league: it grades every Competition policy "
+                    "purely on how well it plays as an IMPOSTER. Each round seats the "
+                    "real entrants on the imposter seats and fills the crew seats with "
+                    "default filler policies (fillers never count)."
+                )
+            elif kind == "crew":
+                role_intro = (
+                    "This is the CREW league: it grades every Competition policy purely "
+                    "on how well it plays as CREW. Each round seats the real entrants on "
+                    "the crew seats and fills the imposter seats with default filler "
+                    "policies (fillers never count)."
+                )
+            else:
+                role_intro = (
+                    "This is the mixed Competition league: each round runs the full "
+                    "8-seat game with the game's natural random role assignment (2 "
+                    "imposters / 6 crew per episode), so a policy is graded across both "
+                    "roles."
+                )
             description.leaderboard_rules = (
-                f"Players are ranked by their WIN RATE over {window} — the "
+                f"{role_intro} Players are ranked by their WIN RATE over {window} — the "
                 "fraction of episodes they won (0 to 1). A player's row aggregates their "
                 "policy versions' won and played episodes. Only recent gameplay counts, "
                 "so players are graded on their current form rather than stale results."
             )
             description.scoring_mechanics = (
-                "Competition round scores are ROLE-WEIGHTED: 3 points per episode won "
-                "as imposter, 1 point per episode won as crew (each episode scores at "
-                "most once; filler seats never count). Standings are RANKED by WIN RATE "
+                "Round scores are ROLE-WEIGHTED: 3 points per episode won as imposter, "
+                "1 point per episode won as crew (each episode scores at most once; "
+                "filler seats never count). Standings are RANKED by WIN RATE "
                 f"= episodes won / episodes played over {window}. The displayed Score "
                 "column is the cumulative sum of each player's role-weighted round "
                 "points. Void/disconnected games in which every player policy scored 0 "
-                "are not counted toward wins or episodes played. The commissioner "
-                "computes the ranking and the platform serves it."
+                "are not counted toward wins or episodes played. The Imposters and Crew "
+                "leagues share the same entrant pool as Competition (a policy qualifies "
+                "once and is graded in all three). The commissioner computes the ranking "
+                "and the platform serves it."
             )
         # Publish the commissioner changelog on every division so operators and
         # players can see how the commissioner works and what functionality changed.
@@ -1814,6 +2220,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
             recent,
             round_episodes,
             participants=set(participant_pvids),
+            division_label=str(getattr(ctx.division, "name", "") or "Competition"),
         )
 
     def _win_total_board(
@@ -1825,6 +2232,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         recent,
         round_episodes: dict[tuple[Any, Any], int] | None = None,
         participants: set | None = None,
+        division_label: str = "Competition",
     ) -> list[DivisionLeaderboardSnapshot]:
         """Collapse per-(player, round) metrics into the all-time WIN-RATE board.
 
@@ -1883,7 +2291,7 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
             cumulative_score = max(0.0, points_total.get(player_id, 0.0))
             _emit_decision_log(
                 {
-                    "division": "Competition",
+                    "division": division_label,
                     "decision": "WIN_RATE_RANK",
                     "player_id": str(player_id) if player_id is not None else None,
                     "rank": rank,

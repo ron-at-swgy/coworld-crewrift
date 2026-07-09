@@ -52,7 +52,11 @@ the human asks after A/B evidence shows the candidate is a true improvement.
 
 Visible divisions:
 
-- `div_acbde92a-df21-4489-859c-4510bd4445f2`: Competition (level 1, type `competition`)
+- `div_acbde92a-df21-4489-859c-4510bd4445f2`: Competition (level 1, type `competition`) — the mixed "Both" league (natural random roles).
+- Imposters (level 2, type `competition`) — role-pinned: entrants play the imposter seats, fillers play crew. Measures the best imposter.
+- Crew (level 3, type `competition`) — role-pinned: entrants play the crew seats, fillers play imposters. Measures the best crew.
+
+All three share one entrant pool (a policy qualifies once into Competition and is graded in all three) and each has its own win-rate standings.
 
 ### Docs
 

@@ -66,6 +66,7 @@ class EpisodeRequest(BaseModel):
     request_id: str
     variant_id: str
     policy_version_ids: list[UUID]
+    game_config: dict[str, Any] | None = None
     seed: int = Field(default_factory=random_episode_seed)
     tags: dict[str, str] = Field(default_factory=dict)
 
