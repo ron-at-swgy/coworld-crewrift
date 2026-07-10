@@ -452,9 +452,57 @@ class MigrateLeagueQualificationTest(unittest.TestCase):
         self.assertEqual(len(commissioner._xp_client.created), mod._MAX_QUALIFY_PER_PASS)
         qualified_ids = {e.league_policy_membership_id for e in result.policy_membership_events}
         self.assertEqual(len(qualified_ids), mod._MAX_QUALIFY_PER_PASS)
-        # The slice is a stable oldest-id-first prefix, so it's deterministic.
+        # The slice is a stable prefix (never-attempted first, then id), so it's
+        # deterministic. Here every membership is never-attempted (substatus None),
+        # so it reduces to an id-first prefix.
         expected = {m.id for m in sorted(pending, key=lambda m: str(m.id))[: mod._MAX_QUALIFY_PER_PASS]}
         self.assertEqual(qualified_ids, expected)
+
+    def test_migrate_league_prioritizes_never_attempted_over_holds(self) -> None:
+        # A backlog of already-attempted holds (substatus set) must not starve
+        # never-attempted submissions (substatus None) out of the bounded per-pass
+        # slice. Regression: the slice was ordered by raw id, so holds with low ids
+        # monopolized every pass and fresh submissions with higher ids were never
+        # evaluated -- stuck in qualifying with a null substatus indefinitely.
+        import crewrift_prime_skill_commissioner as mod
+
+        commissioner = _commissioner()
+        commissioner._xp_client = _FakeXpClient(run=_completed_run(), results=_good_combined_game())
+        _wire_interview(commissioner)
+        league_id = uuid4()
+        cap = mod._MAX_QUALIFY_PER_PASS
+        # Holds take the LOWEST ids, so a raw-id sort would fill the whole slice
+        # with them and starve the fresh submissions below.
+        held = [
+            MembershipSnapshot(
+                id=UUID(int=i), league_id=league_id, division_id=_COMPETITION_DIV,
+                policy_version_id=uuid4(), player_id=f"ply_held_{i}",
+                status=PolicyMembershipStatus.qualifying, substatus="skill_gate",
+            )
+            for i in range(cap)
+        ]
+        # Never-attempted submissions take HIGHER ids -> starved under a raw-id sort.
+        fresh = [
+            MembershipSnapshot(
+                id=UUID(int=1000 + i), league_id=league_id, division_id=_COMPETITION_DIV,
+                policy_version_id=uuid4(), player_id=f"ply_fresh_{i}",
+                status=PolicyMembershipStatus.qualifying, substatus=None,
+            )
+            for i in range(3)
+        ]
+        ctx = LeagueMigrationContext(
+            league=LeagueSnapshot(id=league_id, commissioner_key="container", commissioner_config=None),
+            divisions=_division_snapshots(league_id),
+            memberships=[*held, *fresh],
+        )
+        with redirect_stdout(io.StringIO()):
+            commissioner.migrate_league(ctx)
+        # The slice still honors the cap, and every never-attempted submission runs
+        # a qualifier this pass (ahead of the holds) rather than being starved.
+        created_pv = {pv for _div, pv in commissioner._xp_client.created}
+        self.assertEqual(len(commissioner._xp_client.created), cap)
+        for m in fresh:
+            self.assertIn(str(m.policy_version_id), created_pv)
 
 
 class OnePolicyPerPlayerTest(unittest.TestCase):
