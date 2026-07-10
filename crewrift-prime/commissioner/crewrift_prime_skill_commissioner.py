@@ -1431,9 +1431,9 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         BOUNDED PER PASS: qualification blocks on a real self-play game + interview
         per membership, run serially, and the platform wraps the whole call in one
         request timeout. We therefore qualify at most ``_MAX_QUALIFY_PER_PASS``
-        memberships per pass (oldest-id first), draining any larger backlog over
-        successive passes so a pass never times out (which would apply zero events
-        and starve round scheduling).
+        memberships per pass (never-attempted first, then id), draining any larger
+        backlog over successive passes so a pass never times out (which would apply
+        zero events and starve round scheduling).
 
         NOTE for the platform: to make qualification fire promptly on each new
         submission, the platform must invoke this migration hook when a policy is
@@ -1455,11 +1455,19 @@ class CrewriftPrimeSkillCommissioner(RulesetStrategyCommissioner):
         # serially, and the platform wraps this whole call in one request timeout;
         # qualifying an unbounded backlog in a single pass would time out, apply
         # ZERO events (so the backlog never drains), and starve round scheduling
-        # (which shares the per-league commissioner container). We take a stable,
-        # fair slice (oldest-id first) and let later passes handle the rest.
+        # (which shares the per-league commissioner container). We take a stable
+        # slice per pass and let later passes handle the rest.
+        #
+        # Order never-attempted memberships (substatus is None) FIRST: a policy that
+        # keeps holding (e.g. a re-tested skill_gate) carries a substatus, so without
+        # this a backlog of low-id holds would fill the whole slice every pass and a
+        # fresh submission would never be evaluated at all (stuck qualifying with a
+        # null substatus indefinitely). The `id` tiebreak keeps each pass's slice
+        # stable. The snapshot carries no timestamp, so `substatus is None` is the
+        # only "never attempted" signal available.
         pending = sorted(
             (m for m in ctx.memberships if _status_str(m.status) in _SUBMITTED_STATUSES),
-            key=lambda m: str(m.id),
+            key=lambda m: (m.substatus is not None, str(m.id)),
         )
         for membership in pending[:_MAX_QUALIFY_PER_PASS]:
             events.append(self.qualify_submission(membership, target_division_id))
